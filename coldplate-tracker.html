@@ -1,0 +1,888 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Coldplate Tracker</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
+<style>
+/* ── SETUP SCREEN ── */
+.setup-screen { min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px; position:relative; z-index:1; }
+.setup-card { background:var(--surface); border:1px solid var(--border); width:100%; max-width:560px; animation:fadeIn .4s ease; }
+.setup-top { padding:28px 28px 20px; border-bottom:1px solid var(--border); background:var(--surface2); }
+.setup-top h1 { font-family:'IBM Plex Mono',monospace; font-size:1.3rem; font-weight:600; }
+.setup-top p { font-family:'IBM Plex Mono',monospace; font-size:.62rem; color:var(--muted); letter-spacing:2px; text-transform:uppercase; margin-top:4px; }
+.setup-body { padding:24px 28px; display:flex; flex-direction:column; gap:18px; }
+.setup-step { display:flex; gap:14px; align-items:flex-start; }
+.step-num { background:var(--text); color:#fff; font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:.7rem; width:22px; height:22px; display:flex; align-items:center; justify-content:center; flex-shrink:0; margin-top:2px; }
+.step-body strong { font-family:'IBM Plex Mono',monospace; font-size:.8rem; display:block; margin-bottom:3px; }
+.step-body p { font-size:.72rem; color:var(--muted); line-height:1.6; }
+.step-body a { color:var(--accent); text-decoration:none; }
+.step-body a:hover { text-decoration:underline; }
+.setup-fields { display:flex; flex-direction:column; gap:10px; }
+.setup-foot { padding:18px 28px; border-top:1px solid var(--border); display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+.btn-signin { background:#0078d4; color:#fff; border:none; font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:.78rem; padding:10px 22px; cursor:pointer; transition:all .15s; display:flex; align-items:center; gap:8px; }
+.btn-signin:hover { filter:brightness(1.1); }
+.setup-note { font-size:.65rem; color:var(--muted); font-family:'IBM Plex Mono',monospace; line-height:1.6; }
+
+/* ── TOP BAR additions ── */
+.user-chip { background:var(--surface2); border:1px solid var(--border); padding:6px 12px; font-family:'IBM Plex Mono',monospace; font-size:.68rem; color:var(--muted); display:flex; align-items:center; gap:5px; }
+.user-chip span { color:var(--text); font-weight:600; }
+.sync-wrap { display:flex; align-items:center; gap:6px; font-family:'IBM Plex Mono',monospace; font-size:.65rem; color:var(--muted); }
+.sync-dot { width:6px; height:6px; border-radius:50%; background:var(--s-complete); }
+.sync-dot.spin { animation:pulse 1s ease infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.2} }
+.btn-sm { background:none; border:1px solid var(--border); color:var(--muted); font-family:'IBM Plex Mono',monospace; font-size:.65rem; padding:6px 10px; cursor:pointer; transition:all .12s; }
+.btn-sm:hover { border-color:var(--s-failed); color:var(--s-failed); }
+
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+:root {
+  --bg:#f4f3ef; --surface:#fff; --surface2:#eeede9; --border:#d8d6cf;
+  --text:#1a1916; --muted:#888580; --accent:#1a5cff; --accent-lt:#e8eeff;
+  --s-received:#6b7280; --s-binned:#d97706; --s-flatness:#7c3aed;
+  --s-leak:#0e7490; --s-thermal:#0891b2; --s-complete:#16a34a; --s-failed:#dc2626;
+}
+
+body { font-family:'IBM Plex Sans',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+body::before { content:''; position:fixed; inset:0; background-image:radial-gradient(circle,#c8c6be 1px,transparent 1px); background-size:24px 24px; opacity:.45; pointer-events:none; z-index:0; }
+
+.app { max-width:1200px; margin:0 auto; padding:32px 24px; position:relative; z-index:1; }
+
+.header { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:28px; gap:16px; flex-wrap:wrap; }
+.brand h1 { font-family:'IBM Plex Mono',monospace; font-size:1.4rem; font-weight:600; letter-spacing:-.5px; }
+.brand p  { font-family:'IBM Plex Mono',monospace; font-size:.62rem; color:var(--muted); letter-spacing:2px; text-transform:uppercase; margin-top:3px; }
+
+.btn { border:none; font-family:'IBM Plex Mono',monospace; font-size:.76rem; padding:9px 18px; cursor:pointer; transition:all .15s; }
+.btn-primary { background:var(--accent); color:#fff; }
+.btn-primary:hover { filter:brightness(1.1); transform:translateY(-1px); box-shadow:0 4px 14px rgba(26,92,255,.25); }
+
+/* summary strip */
+.strip { display:grid; grid-template-columns:repeat(7,1fr); border:1px solid var(--border); background:var(--surface); margin-bottom:24px; overflow:hidden; }
+.strip-cell { padding:14px; border-right:1px solid var(--border); cursor:pointer; transition:background .12s; position:relative; }
+.strip-cell:last-child { border-right:none; }
+.strip-cell:hover { background:var(--surface2); }
+.strip-cell.active { background:var(--accent-lt); }
+.strip-cell.active::after { content:''; position:absolute; bottom:0; left:0; right:0; height:3px; background:var(--accent); }
+.strip-label { font-family:'IBM Plex Mono',monospace; font-size:.58rem; text-transform:uppercase; letter-spacing:2px; color:var(--muted); margin-bottom:6px; display:flex; align-items:center; gap:5px; }
+.strip-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+.strip-count { font-family:'IBM Plex Mono',monospace; font-size:1.5rem; font-weight:600; line-height:1; }
+
+/* controls */
+.controls { display:flex; gap:8px; margin-bottom:16px; }
+.sw { flex:1; position:relative; }
+.sw input { width:100%; background:var(--surface); border:1px solid var(--border); color:var(--text); font-family:'IBM Plex Mono',monospace; font-size:.78rem; padding:9px 12px 9px 32px; outline:none; transition:border-color .2s; }
+.sw input:focus { border-color:var(--accent); }
+.si { position:absolute; left:10px; top:50%; transform:translateY(-50%); color:var(--muted); pointer-events:none; }
+
+/* lot card */
+.lot-card { background:var(--surface); border:1px solid var(--border); margin-bottom:10px; overflow:hidden; animation:fadeIn .25s ease both; }
+
+.lot-head { display:grid; grid-template-columns:22px 1fr auto auto; gap:14px; padding:14px 18px; align-items:center; cursor:pointer; transition:background .12s; user-select:none; }
+.lot-head:hover { background:var(--surface2); }
+
+.lot-chevron { color:var(--muted); font-size:.8rem; transition:transform .2s; justify-self:center; }
+.lot-chevron.open { transform:rotate(90deg); }
+
+.lot-id-text { font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:.95rem; }
+.lot-sub { font-family:'IBM Plex Mono',monospace; font-size:.65rem; color:var(--muted); margin-top:2px; }
+
+.lot-prog { display:flex; align-items:center; gap:10px; }
+.prog-bar { width:110px; height:5px; background:var(--surface2); border:1px solid var(--border); overflow:hidden; }
+.prog-fill { height:100%; background:var(--accent); transition:width .3s; }
+.prog-lbl { font-family:'IBM Plex Mono',monospace; font-size:.62rem; color:var(--muted); white-space:nowrap; }
+
+.lot-btns { display:flex; gap:5px; }
+.lbtn { background:none; border:1px solid var(--border); color:var(--muted); font-family:'IBM Plex Mono',monospace; font-size:.65rem; padding:5px 10px; cursor:pointer; transition:all .12s; white-space:nowrap; }
+.lbtn:hover { border-color:var(--accent); color:var(--accent); }
+.lbtn.del:hover { border-color:var(--s-failed); color:var(--s-failed); }
+
+/* plates inside lot */
+.lot-body { border-top:1px solid var(--border); display:none; }
+.lot-body.open { display:block; }
+
+.pt-head { display:grid; grid-template-columns:130px 85px 130px 130px 130px 110px 80px; padding:8px 18px 8px 40px; background:var(--surface2); border-bottom:1px solid var(--border); font-family:'IBM Plex Mono',monospace; font-size:.58rem; text-transform:uppercase; letter-spacing:2px; color:var(--muted); gap:8px; }
+
+.pt-row { display:grid; grid-template-columns:130px 85px 130px 130px 130px 110px 80px; padding:10px 18px 10px 40px; border-bottom:1px solid var(--border); align-items:center; gap:8px; transition:background .1s; animation:fadeIn .2s ease both; }
+.pt-row:last-child { border-bottom:none; }
+.pt-row:hover { background:var(--surface2); }
+
+.serial { font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:.82rem; color:var(--accent); }
+.bin-badge { display:inline-flex; align-items:center; gap:4px; background:var(--surface2); border:1px solid var(--border); padding:2px 7px; font-family:'IBM Plex Mono',monospace; font-size:.67rem; }
+
+.stage-chip { display:inline-flex; align-items:center; gap:5px; padding:3px 8px; font-size:.6rem; font-family:'IBM Plex Mono',monospace; text-transform:uppercase; letter-spacing:1px; border:1px solid; }
+
+.tcell { display:flex; flex-direction:column; gap:1px; }
+.tcell-row { display:flex; gap:5px; align-items:center; font-family:'IBM Plex Mono',monospace; font-size:.7rem; }
+.tbadge { width:21px; height:21px; display:flex; align-items:center; justify-content:center; font-size:.6rem; font-weight:700; border:1px solid; flex-shrink:0; }
+.tp { background:#dcfce7; border-color:#16a34a; color:#16a34a; }
+.tf { background:#fee2e2; border-color:#dc2626; color:#dc2626; }
+.tn { background:var(--surface2); border-color:var(--border); color:var(--muted); }
+.tname { font-family:'IBM Plex Mono',monospace; font-size:.6rem; color:var(--muted); }
+
+.pact { display:flex; gap:4px; justify-content:flex-end; }
+.ibtn { background:none; border:1px solid var(--border); color:var(--muted); width:26px; height:26px; cursor:pointer; font-size:.7rem; display:flex; align-items:center; justify-content:center; transition:all .12s; }
+.ibtn:hover { border-color:var(--accent); color:var(--accent); }
+.ibtn.del:hover { border-color:#dc2626; color:#dc2626; }
+
+.lot-add { padding:9px 18px 9px 40px; border-top:1px solid var(--border); }
+.lot-add button { background:none; border:1px dashed var(--border); color:var(--muted); font-family:'IBM Plex Mono',monospace; font-size:.68rem; padding:7px 14px; cursor:pointer; transition:all .12s; width:100%; text-align:left; }
+.lot-add button:hover { border-color:var(--accent); color:var(--accent); }
+
+.empty-lot { padding:18px 18px 18px 40px; color:var(--muted); font-family:'IBM Plex Mono',monospace; font-size:.68rem; font-style:italic; }
+.empty-state { padding:60px; text-align:center; color:var(--muted); font-family:'IBM Plex Mono',monospace; font-size:.75rem; letter-spacing:1px; }
+
+/* modals */
+.ov { position:fixed; inset:0; background:rgba(0,0,0,.5); display:flex; align-items:center; justify-content:center; z-index:200; opacity:0; pointer-events:none; transition:opacity .2s; backdrop-filter:blur(3px); }
+.ov.open { opacity:1; pointer-events:all; }
+.modal { background:var(--surface); border:1px solid var(--border); width:92%; max-width:500px; transform:translateY(14px); transition:transform .2s; max-height:92vh; overflow-y:auto; }
+.ov.open .modal { transform:translateY(0); }
+.mhead { display:flex; justify-content:space-between; align-items:center; padding:16px 20px; border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--surface); z-index:1; }
+.mhead h2 { font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:.9rem; }
+.mclose { background:none; border:none; color:var(--muted); cursor:pointer; font-size:1.1rem; }
+.mbody { padding:20px; display:flex; flex-direction:column; gap:15px; }
+.mfoot { padding:13px 20px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:8px; position:sticky; bottom:0; background:var(--surface); }
+
+.frow { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.frow.single { grid-template-columns:1fr; }
+.ff { display:flex; flex-direction:column; gap:5px; }
+.ff label { font-family:'IBM Plex Mono',monospace; font-size:.58rem; text-transform:uppercase; letter-spacing:2px; color:var(--muted); }
+.ff input,.ff select,.ff textarea { background:var(--bg); border:1px solid var(--border); color:var(--text); font-family:'IBM Plex Mono',monospace; font-size:.82rem; padding:9px 11px; outline:none; transition:border-color .2s; appearance:none; }
+.ff input:focus,.ff select:focus,.ff textarea:focus { border-color:var(--accent); }
+.ff textarea { resize:vertical; min-height:60px; }
+
+.sec { font-family:'IBM Plex Mono',monospace; font-size:.58rem; text-transform:uppercase; letter-spacing:3px; color:var(--muted); padding-bottom:7px; border-bottom:1px solid var(--border); }
+
+.sgrid { display:grid; grid-template-columns:repeat(3,1fr); gap:5px; }
+.sopt { border:1px solid var(--border); padding:7px 5px; text-align:center; cursor:pointer; font-family:'IBM Plex Mono',monospace; font-size:.62rem; text-transform:uppercase; letter-spacing:.5px; transition:all .12s; color:var(--muted); }
+.sopt:hover { border-color:var(--accent); color:var(--accent); }
+.sopt.sel { font-weight:600; }
+
+.tblocks { display:flex; gap:10px; flex-wrap:wrap; }
+.tblock { flex:1; min-width:130px; display:flex; flex-direction:column; gap:8px; }
+.tblock-title { font-family:'IBM Plex Mono',monospace; font-size:.68rem; font-weight:600; }
+.rrow { display:flex; gap:5px; }
+.ropt { flex:1; border:1px solid var(--border); padding:6px 3px; display:flex; align-items:center; justify-content:center; cursor:pointer; font-family:'IBM Plex Mono',monospace; font-size:.62rem; transition:all .12s; text-transform:uppercase; }
+.ropt:hover { border-color:var(--accent); }
+.ropt.cp { border-color:#16a34a; background:#dcfce7; color:#16a34a; }
+.ropt.cf { border-color:#dc2626; background:#fee2e2; color:#dc2626; }
+.ropt.cn { border-color:var(--muted); color:var(--muted); }
+
+.btn-cancel { background:none; border:1px solid var(--border); color:var(--muted); font-family:'IBM Plex Mono',monospace; font-size:.75rem; padding:8px 16px; cursor:pointer; transition:all .12s; }
+.btn-cancel:hover { border-color:var(--text); color:var(--text); }
+.btn-save { background:var(--text); border:none; color:#fff; font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:.78rem; padding:8px 22px; cursor:pointer; transition:all .12s; }
+.btn-save:hover { background:var(--accent); }
+
+.toast { position:fixed; bottom:20px; right:20px; background:var(--text); color:#fff; padding:10px 16px; font-family:'IBM Plex Mono',monospace; font-size:.72rem; z-index:300; opacity:0; transform:translateY(10px); pointer-events:none; transition:all .25s; }
+.toast.show { opacity:1; transform:translateY(0); }
+
+@keyframes fadeIn { from{opacity:0;transform:translateY(5px)} to{opacity:1;transform:translateY(0)} }
+@keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+</style>
+</head>
+<body>
+
+<!-- SETUP SCREEN -->
+<div id="setupScreen" class="setup-screen">
+  <div class="setup-card">
+    <div class="setup-top">
+      <h1>COLDPLATE TRACKER</h1>
+      <p>Connect to SharePoint — one-time setup</p>
+    </div>
+    <div class="setup-body">
+      <div class="setup-step">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <strong>Register a free Azure app</strong>
+          <p>Go to <a href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/CreateApplicationBlade" target="_blank">portal.azure.com → App registrations → New</a>.<br>
+          Name it anything. Set <em>Supported account types</em> to <em>Accounts in this organizational directory only</em>.<br>
+          Under <em>Redirect URI</em> choose <em>Single-page application</em> and paste the full URL where this file is hosted.<br>
+          Copy the <strong>Application (client) ID</strong>.</p>
+        </div>
+      </div>
+      <div class="setup-step">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <strong>Find your SharePoint site URL &amp; folder</strong>
+          <p>Open the SharePoint folder where data should live. Copy your <strong>site URL</strong> (e.g. <code>https://company.sharepoint.com/sites/mysite</code>) and the <strong>folder path</strong> inside the document library (e.g. <code>/Shared Documents/Coldplate Lab</code>).</p>
+        </div>
+      </div>
+      <div class="setup-step">
+        <div class="step-num">3</div>
+        <div class="step-body"><strong>Paste your details below and sign in</strong></div>
+      </div>
+      <div class="setup-fields">
+        <div class="ff"><label>Azure Client ID</label><input type="text" id="cfgClientId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"></div>
+        <div class="ff"><label>SharePoint Site URL</label><input type="text" id="cfgSiteUrl" placeholder="https://company.sharepoint.com/sites/mysite"></div>
+        <div class="ff"><label>Folder Path in Document Library</label><input type="text" id="cfgFolderPath" placeholder="/Shared Documents/Coldplate Lab"></div>
+      </div>
+    </div>
+    <div class="setup-foot">
+      <button class="btn-signin" onclick="startSignIn()">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="white"><rect x="1" y="1" width="6.5" height="6.5"/><rect x="8.5" y="1" width="6.5" height="6.5"/><rect x="1" y="8.5" width="6.5" height="6.5"/><rect x="8.5" y="8.5" width="6.5" height="6.5"/></svg>
+        Sign in with Microsoft
+      </button>
+      <div class="setup-note">Settings are saved in your browser.<br>Data is read/written directly to your SharePoint folder as <code>coldplate-data.json</code>.</div>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div id="appScreen" style="display:none">
+<div class="app">
+
+  <div class="header">
+    <div class="brand">
+      <h1>COLDPLATE TRACKER</h1>
+      <p id="spLabel">SharePoint · Lot &amp; Sample Lifecycle</p>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <div class="sync-wrap"><div class="sync-dot" id="syncDot"></div><span id="syncLabel">Synced</span></div>
+      <div class="user-chip">👤 <span id="userLabel">—</span></div>
+      <button class="btn-sm" onclick="signOut()">Sign out</button>
+      <button class="btn btn-primary" onclick="openLotModal()">+ Receive New Lot</button>
+    </div>
+  </div>
+
+  <div class="strip" id="strip"></div>
+
+  <div class="controls">
+    <div class="sw"><span class="si">⌕</span><input type="text" id="q" placeholder="Search lot ID or serial number…" oninput="render()"></div>
+  </div>
+
+  <div id="lotList"></div>
+</div>
+</div>
+
+<!-- LOT MODAL -->
+<div class="ov" id="lotOv" onclick="if(event.target===this)closeLotModal()">
+  <div class="modal">
+    <div class="mhead"><h2 id="lotMTitle">Receive New Lot</h2><button class="mclose" onclick="closeLotModal()">✕</button></div>
+    <div class="mbody">
+      <!-- category + preview row -->
+      <div class="frow">
+        <div class="ff">
+          <label>Design Category *</label>
+          <div style="display:flex;gap:6px;align-items:stretch">
+            <select id="lCatSelect" onchange="onCatChange()" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:.82rem;padding:9px 11px;outline:none;appearance:none;">
+              <option value="">Select…</option>
+            </select>
+            <button onclick="openAddCat()" title="Add new category" style="background:var(--surface2);border:1px solid var(--border);color:var(--muted);font-size:1rem;width:38px;cursor:pointer;transition:all .12s;flex-shrink:0;" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">+</button>
+          </div>
+        </div>
+        <div class="ff">
+          <label>Generated Lot ID</label>
+          <div id="lotIdPreview" style="font-family:'IBM Plex Mono',monospace;font-size:.95rem;font-weight:600;padding:9px 11px;background:var(--surface2);border:1px solid var(--border);color:var(--accent);min-height:38px;">—</div>
+        </div>
+      </div>
+      <div class="frow">
+        <div class="ff"><label>Date Received</label><input type="date" id="lDate"></div>
+        <div class="ff" id="editLotIdField" style="display:none">
+          <label>Lot ID (editing)</label>
+          <input type="text" id="lLotId" placeholder="">
+        </div>
+      </div>
+      <div class="frow single">
+        <div class="ff"><label>Notes</label><textarea id="lNotes" placeholder="Any notes about this shipment…"></textarea></div>
+      </div>
+    </div>
+    <div class="mfoot">
+      <button class="btn-cancel" onclick="closeLotModal()">Cancel</button>
+      <button class="btn-save" onclick="saveLot()">Save Lot</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADD CATEGORY MODAL -->
+<div class="ov" id="catOv" onclick="if(event.target===this)closeCatModal()" style="z-index:300">
+  <div class="modal" style="max-width:360px">
+    <div class="mhead"><h2>Add Design Category</h2><button class="mclose" onclick="closeCatModal()">✕</button></div>
+    <div class="mbody">
+      <div class="ff">
+        <label>Category Code *</label>
+        <input type="text" id="newCatInput" placeholder="e.g. 60AA, 61AB…" style="text-transform:uppercase" oninput="this.value=this.value.toUpperCase()">
+      </div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:.65rem;color:var(--muted);line-height:1.6">
+        Lots in this category will be numbered:<br>
+        <span id="catPreviewExample" style="color:var(--accent)">—</span>
+      </div>
+    </div>
+    <div class="mfoot">
+      <button class="btn-cancel" onclick="closeCatModal()">Cancel</button>
+      <button class="btn-save" onclick="saveNewCat()">Add Category</button>
+    </div>
+  </div>
+</div>
+
+<!-- PLATE MODAL -->
+<div class="ov" id="plateOv" onclick="if(event.target===this)closePlateModal()">
+  <div class="modal">
+    <div class="mhead"><h2 id="plateMTitle">Add Coldplate</h2><button class="mclose" onclick="closePlateModal()">✕</button></div>
+    <div class="mbody">
+      <div class="frow">
+        <div class="ff"><label>Serial Number *</label><input type="text" id="pSerial" placeholder="e.g. SN-00142"></div>
+        <div class="ff"><label>Bin Location</label><input type="text" id="pBin" placeholder="e.g. BIN-A3"></div>
+      </div>
+
+      <div class="sec">Stage</div>
+      <div class="sgrid" id="sgrid"></div>
+
+      <div class="sec">Test Results</div>
+      <div class="tblocks">
+        <div class="tblock">
+          <div class="tblock-title">📐 Flatness</div>
+          <div class="rrow">
+            <div class="ropt" id="rf-n" onclick="setT('f','pending')">— Pend</div>
+            <div class="ropt" id="rf-p" onclick="setT('f','pass')">✓ Pass</div>
+            <div class="ropt" id="rf-f" onclick="setT('f','fail')">✕ Fail</div>
+          </div>
+          <div class="ff"><label>Tested By</label><input type="text" id="pFT" placeholder="Name"></div>
+        </div>
+        <div class="tblock">
+          <div class="tblock-title">💧 Leak</div>
+          <div class="rrow">
+            <div class="ropt" id="rl-n" onclick="setT('l','pending')">— Pend</div>
+            <div class="ropt" id="rl-p" onclick="setT('l','pass')">✓ Pass</div>
+            <div class="ropt" id="rl-f" onclick="setT('l','fail')">✕ Fail</div>
+          </div>
+          <div class="ff"><label>Tested By</label><input type="text" id="pLT" placeholder="Name"></div>
+        </div>
+        <div class="tblock">
+          <div class="tblock-title">🌡 Thermal</div>
+          <div class="rrow">
+            <div class="ropt" id="rt-n" onclick="setT('t','pending')">— Pend</div>
+            <div class="ropt" id="rt-p" onclick="setT('t','pass')">✓ Pass</div>
+            <div class="ropt" id="rt-f" onclick="setT('t','fail')">✕ Fail</div>
+          </div>
+          <div class="ff"><label>Tested By</label><input type="text" id="pTT" placeholder="Name"></div>
+        </div>
+      </div>
+
+      <div class="frow single">
+        <div class="ff"><label>Notes</label><textarea id="pNotes" placeholder="Observations…"></textarea></div>
+      </div>
+    </div>
+    <div class="mfoot">
+      <button class="btn-cancel" onclick="closePlateModal()">Cancel</button>
+      <button class="btn-save" onclick="savePlate()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const STAGES = [
+  {id:'received', label:'Received', color:'var(--s-received)'},
+  {id:'binned',   label:'Binned',   color:'var(--s-binned)'},
+  {id:'flatness', label:'Flatness', color:'var(--s-flatness)'},
+  {id:'leak',     label:'Leak',     color:'var(--s-leak)'},
+  {id:'thermal',  label:'Thermal',  color:'var(--s-thermal)'},
+  {id:'complete', label:'Complete', color:'var(--s-complete)'},
+  {id:'failed',   label:'Failed',   color:'var(--s-failed)'},
+];
+const FLOW = ['received','binned','flatness','leak','thermal','complete'];
+
+// ── CONFIG ──
+let CFG = {
+  clientId:   localStorage.getItem('cp_clientId')   || '',
+  siteUrl:    localStorage.getItem('cp_siteUrl')     || '',
+  folderPath: localStorage.getItem('cp_folderPath')  || '',
+};
+
+const SCOPES = ['Sites.ReadWrite.All', 'User.Read'];
+const FILE_NAME = 'coldplate-data.json';
+
+let msalInstance = null;
+let msalAccount  = null;
+let spSiteId     = null; // resolved once after login
+
+// ── MSAL INIT ──
+function initMsal(clientId) {
+  msalInstance = new msal.PublicClientApplication({
+    auth: {
+      clientId,
+      authority: 'https://login.microsoftonline.com/organizations',
+      redirectUri: window.location.href.split('?')[0].split('#')[0],
+    },
+    cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: false }
+  });
+}
+
+window.addEventListener('load', async () => {
+  if (CFG.clientId) {
+    document.getElementById('cfgClientId').value   = CFG.clientId;
+    document.getElementById('cfgSiteUrl').value    = CFG.siteUrl;
+    document.getElementById('cfgFolderPath').value = CFG.folderPath;
+    initMsal(CFG.clientId);
+    try {
+      await msalInstance.handleRedirectPromise();
+      const accounts = msalInstance.getAllAccounts();
+      if (accounts.length > 0) { msalAccount = accounts[0]; await showApp(); }
+    } catch(e) { console.warn(e); }
+  }
+});
+
+async function startSignIn() {
+  const clientId   = document.getElementById('cfgClientId').value.trim();
+  const siteUrl    = document.getElementById('cfgSiteUrl').value.trim().replace(/\/$/, '');
+  const folderPath = document.getElementById('cfgFolderPath').value.trim().replace(/\/$/, '');
+  if (!clientId || !siteUrl || !folderPath) { alert('Please fill in all three fields.'); return; }
+  localStorage.setItem('cp_clientId',   clientId);
+  localStorage.setItem('cp_siteUrl',    siteUrl);
+  localStorage.setItem('cp_folderPath', folderPath);
+  CFG = { clientId, siteUrl, folderPath };
+  initMsal(clientId);
+  try {
+    const resp = await msalInstance.loginPopup({ scopes: SCOPES });
+    msalAccount = resp.account;
+    await showApp();
+  } catch(e) { alert('Sign-in failed: ' + e.message); }
+}
+
+function signOut() {
+  msalInstance.logoutPopup({ account: msalAccount });
+  msalAccount = null; spSiteId = null;
+  document.getElementById('appScreen').style.display = 'none';
+  document.getElementById('setupScreen').style.display = 'flex';
+}
+
+async function getToken() {
+  try {
+    const r = await msalInstance.acquireTokenSilent({ scopes: SCOPES, account: msalAccount });
+    return r.accessToken;
+  } catch {
+    const r = await msalInstance.acquireTokenPopup({ scopes: SCOPES });
+    return r.accessToken;
+  }
+}
+
+// ── GRAPH HELPERS ──
+async function graphGet(url) {
+  const token = await getToken();
+  const r = await fetch('https://graph.microsoft.com/v1.0' + url, { headers: { Authorization: 'Bearer ' + token } });
+  if (!r.ok) throw new Error(`GET ${url} → ${r.status} ${await r.text()}`);
+  return r.json();
+}
+
+async function graphPut(url, body) {
+  const token = await getToken();
+  const r = await fetch('https://graph.microsoft.com/v1.0' + url, {
+    method: 'PUT',
+    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: typeof body === 'string' ? body : JSON.stringify(body)
+  });
+  if (!r.ok) throw new Error(`PUT ${url} → ${r.status} ${await r.text()}`);
+  return r.json();
+}
+
+// ── SHAREPOINT FILE OPERATIONS ──
+async function getSiteId() {
+  if (spSiteId) return spSiteId;
+  // Parse host and site path from siteUrl
+  const url = new URL(CFG.siteUrl);
+  const host = url.hostname;
+  const sitePath = url.pathname; // e.g. /sites/mysite
+  const data = await graphGet(`/sites/${host}:${sitePath}`);
+  spSiteId = data.id;
+  return spSiteId;
+}
+
+async function getFileUrl() {
+  const siteId = await getSiteId();
+  const folder = CFG.folderPath; // e.g. /Shared Documents/Coldplate Lab
+  const encodedPath = encodeURIComponent(folder + '/' + FILE_NAME).replace(/%2F/g, '/');
+  return `/sites/${siteId}/drive/root:${encodedPath}:/content`;
+}
+
+async function loadFromSharePoint() {
+  setSyncing(true);
+  showSkeleton();
+  try {
+    const siteId = await getSiteId();
+    const folder = CFG.folderPath;
+    const encodedPath = encodeURIComponent(folder + '/' + FILE_NAME).replace(/%2F/g, '/');
+    const metaUrl = `/sites/${siteId}/drive/root:${encodedPath}`;
+    let raw;
+    try {
+      const meta = await graphGet(metaUrl);
+      // Download the file content
+      const token = await getToken();
+      const r = await fetch(meta['@microsoft.graph.downloadUrl'] || `https://graph.microsoft.com/v1.0${metaUrl}:/content`, {
+        headers: { Authorization: 'Bearer ' + token }
+      });
+      raw = await r.json();
+    } catch(e) {
+      // File doesn't exist yet — start fresh
+      raw = { categories: ['60AA','60AB','61AA'], lots: [], plates: [] };
+    }
+    categories = raw.categories || ['60AA','60AB','61AA'];
+    lots       = raw.lots       || [];
+    plates     = raw.plates     || [];
+    render();
+  } catch(e) {
+    toast('Load failed: ' + e.message);
+    categories = []; lots = []; plates = [];
+    render();
+  }
+  setSyncing(false);
+}
+
+async function saveAll() {
+  setSyncing(true);
+  try {
+    const siteId = await getSiteId();
+    const folder = CFG.folderPath;
+    const encodedPath = encodeURIComponent(folder + '/' + FILE_NAME).replace(/%2F/g, '/');
+    const uploadUrl = `/sites/${siteId}/drive/root:${encodedPath}:/content`;
+    const payload = JSON.stringify({ categories, lots, plates }, null, 2);
+    const token = await getToken();
+    const r = await fetch('https://graph.microsoft.com/v1.0' + uploadUrl, {
+      method: 'PUT',
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: payload
+    });
+    if (!r.ok) throw new Error(await r.text());
+    toast('Saved to SharePoint ✓');
+  } catch(e) {
+    toast('Save failed: ' + e.message);
+  }
+  setSyncing(false);
+}
+
+// ── SHOW APP ──
+async function showApp() {
+  document.getElementById('setupScreen').style.display = 'none';
+  document.getElementById('appScreen').style.display   = 'block';
+  document.getElementById('userLabel').textContent = msalAccount.username;
+  const host = new URL(CFG.siteUrl).hostname.split('.')[0];
+  document.getElementById('spLabel').textContent = `${host} SharePoint · Lot & Sample Lifecycle`;
+  await loadFromSharePoint();
+}
+
+function setSyncing(on) {
+  document.getElementById('syncDot').classList.toggle('spin', on);
+  document.getElementById('syncLabel').textContent = on ? 'Syncing…' : 'Synced';
+}
+
+function showSkeleton() {
+  document.getElementById('lotList').innerHTML = [1,2,3].map(()=>
+    `<div style="background:var(--surface);border:1px solid var(--border);margin-bottom:10px;padding:18px 18px">
+      <div style="height:14px;width:30%;background:linear-gradient(90deg,var(--surface2) 25%,var(--border) 50%,var(--surface2) 75%);background-size:200% 100%;animation:shimmer 1.4s infinite;border-radius:2px;margin-bottom:8px"></div>
+      <div style="height:10px;width:55%;background:linear-gradient(90deg,var(--surface2) 25%,var(--border) 50%,var(--surface2) 75%);background-size:200% 100%;animation:shimmer 1.4s infinite;border-radius:2px"></div>
+    </div>`
+  ).join('');
+}
+
+// ── DATA STATE (populated from SharePoint) ──
+let categories = [];
+let lots   = [];
+let plates = [];
+
+let sfilt = null;
+let expanded = new Set(lots.map(l=>l.id));
+let editLotId = null, editPlateId = null, lotCtx = null;
+let mF='pending', mL='pending', mT='pending', mS='received';
+
+const si = id => STAGES.find(s=>s.id===id)||STAGES[0];
+const nextS = id => { const i=FLOW.indexOf(id); return i>=0&&i<FLOW.length-1?FLOW[i+1]:null; };
+const lotPs = lid => plates.filter(p=>p.lotId===lid);
+
+function prog(lid) {
+  const ps=lotPs(lid); if(!ps.length) return{pct:0,done:0,tot:0};
+  const done=ps.filter(p=>p.stage==='complete').length;
+  return{pct:Math.round(done/ps.length*100),done,tot:ps.length};
+}
+
+function render() {
+  renderStrip();
+  renderLots();
+}
+
+function renderStrip() {
+  const counts={};
+  STAGES.forEach(s=>counts[s.id]=0);
+  plates.forEach(p=>{ if(counts[p.stage]!==undefined) counts[p.stage]++; });
+  document.getElementById('strip').innerHTML = STAGES.map(s=>
+    `<div class="strip-cell ${sfilt===s.id?'active':''}" onclick="toggleF('${s.id}')">
+      <div class="strip-label"><span class="strip-dot" style="background:${s.color}"></span>${s.label}</div>
+      <div class="strip-count" style="color:${s.color}">${counts[s.id]}</div>
+    </div>`
+  ).join('');
+}
+
+function toggleF(id) { sfilt = sfilt===id?null:id; render(); }
+
+function renderLots() {
+  const q = document.getElementById('q').value.toLowerCase();
+  const vis = lots.filter(l => {
+    if(l.lotId.toLowerCase().includes(q)) return true;
+    if((l.category||'').toLowerCase().includes(q)) return true;
+    return lotPs(l.id).some(p=>p.serial.toLowerCase().includes(q)||(p.bin||'').toLowerCase().includes(q));
+  });
+
+  const el = document.getElementById('lotList');
+  if(!vis.length){ el.innerHTML=`<div class="empty-state">No lots found. Click "Receive New Lot" to get started.</div>`; return; }
+
+  el.innerHTML = vis.map((lot,li)=>{
+    const pr = prog(lot.id);
+    const isOpen = expanded.has(lot.id);
+    const ps = lotPs(lot.id).filter(p=>{
+      const sok = !sfilt||p.stage===sfilt;
+      const qok = !q||p.serial.toLowerCase().includes(q)||(p.bin||'').toLowerCase().includes(q)||lot.lotId.toLowerCase().includes(q);
+      return sok&&qok;
+    });
+
+    return `<div class="lot-card" style="animation-delay:${li*.04}s">
+      <div class="lot-head" onclick="toggleLot('${lot.id}')">
+        <span class="lot-chevron ${isOpen?'open':''}">▶</span>
+        <div>
+          <div class="lot-id-text">${lot.lotId}</div>
+          <div class="lot-sub">${lot.category ? `<span style="font-family:'IBM Plex Mono',monospace;font-size:.6rem;background:var(--accent-lt);border:1px solid var(--accent);color:var(--accent);padding:1px 6px;margin-right:6px">${lot.category}</span>` : ''}Received ${lot.received}${lot.notes?' · '+lot.notes.slice(0,40)+(lot.notes.length>40?'…':''):''} · ${lotPs(lot.id).length} plate${lotPs(lot.id).length!==1?'s':''}</div>
+        </div>
+        <div class="lot-prog">
+          <div class="prog-bar"><div class="prog-fill" style="width:${pr.pct}%"></div></div>
+          <div class="prog-lbl">${pr.done}/${pr.tot} complete</div>
+        </div>
+        <div class="lot-btns" onclick="event.stopPropagation()">
+          <button class="lbtn" onclick="openLotModal('${lot.id}')">Edit</button>
+          <button class="lbtn del" onclick="deleteLot('${lot.id}')">Delete</button>
+        </div>
+      </div>
+      <div class="lot-body ${isOpen?'open':''}">
+        ${ps.length>0?`
+          <div class="pt-head"><div>Serial #</div><div>Bin</div><div>Flatness</div><div>Leak</div><div>Thermal</div><div>Stage</div><div style="text-align:right">Actions</div></div>
+          ${ps.map((p,i)=>plateRow(p,i)).join('')}
+        `:`<div class="empty-lot">No coldplates logged yet${sfilt?' matching this filter':''}.</div>`}
+        <div class="lot-add"><button onclick="openPlateModal(null,'${lot.id}')">+ Add coldplate to ${lot.lotId}</button></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function plateRow(p,i) {
+  const st=si(p.stage), nxt=nextS(p.stage);
+  const bf=p.flatness==='pass'?'tp':p.flatness==='fail'?'tf':'tn';
+  const bl=p.leak==='pass'?'tp':p.leak==='fail'?'tf':'tn';
+  const bt=p.thermal==='pass'?'tp':p.thermal==='fail'?'tf':'tn';
+  const fl=p.flatness==='pass'?'Pass':p.flatness==='fail'?'Fail':'Pending';
+  const ll=p.leak==='pass'?'Pass':p.leak==='fail'?'Fail':'Pending';
+  const tl=p.thermal==='pass'?'Pass':p.thermal==='fail'?'Fail':'Pending';
+  return `<div class="pt-row" style="animation-delay:${i*.025}s">
+    <div class="serial">${p.serial}</div>
+    <div>${p.bin?`<span class="bin-badge">📦 ${p.bin}</span>`:'<span style="color:var(--muted);font-size:.7rem">—</span>'}</div>
+    <div class="tcell">
+      <div class="tcell-row"><div class="tbadge ${bf}">${p.flatness==='pass'?'✓':p.flatness==='fail'?'✕':'–'}</div> ${fl}</div>
+      ${p.flatnessTester?`<div class="tname">by ${p.flatnessTester}</div>`:''}
+    </div>
+    <div class="tcell">
+      <div class="tcell-row"><div class="tbadge ${bl}">${p.leak==='pass'?'✓':p.leak==='fail'?'✕':'–'}</div> ${ll}</div>
+      ${p.leakTester?`<div class="tname">by ${p.leakTester}</div>`:''}
+    </div>
+    <div class="tcell">
+      <div class="tcell-row"><div class="tbadge ${bt}">${p.thermal==='pass'?'✓':p.thermal==='fail'?'✕':'–'}</div> ${tl}</div>
+      ${p.thermalTester?`<div class="tname">by ${p.thermalTester}</div>`:''}
+    </div>
+    <div><span class="stage-chip" style="border-color:${st.color};color:${st.color}"><span style="width:5px;height:5px;border-radius:50%;background:${st.color};display:inline-block;margin-right:3px"></span>${st.label}</span></div>
+    <div class="pact">
+      <button class="ibtn" title="Edit" onclick="openPlateModal('${p.id}')">✎</button>
+      ${nxt&&p.stage!=='failed'?`<button class="ibtn" title="Advance to ${si(nxt).label}" onclick="advance('${p.id}')">→</button>`:''}
+      <button class="ibtn del" title="Delete" onclick="delPlate('${p.id}')">✕</button>
+    </div>
+  </div>`;
+}
+
+function toggleLot(id){ expanded.has(id)?expanded.delete(id):expanded.add(id); render(); }
+
+function deleteLot(id){
+  const c=lotPs(id).length;
+  if(!confirm(c>0?`Delete lot and all ${c} coldplate(s) inside it?`:'Delete this lot?')) return;
+  lots=lots.filter(l=>l.id!==id);
+  plates=plates.filter(p=>p.lotId!==id);
+  saveAll(); render(); toast('Lot deleted');
+}
+
+function advance(id){
+  const p=plates.find(x=>x.id===id); if(!p) return;
+  const nxt=nextS(p.stage); if(!nxt) return;
+  p.stage=nxt; saveAll(); render(); toast(`${p.serial} → ${si(nxt).label}`);
+}
+
+function delPlate(id){
+  if(!confirm('Remove this coldplate?')) return;
+  plates=plates.filter(p=>p.id!==id); saveAll(); render();
+}
+
+// ── CATEGORY HELPERS ──
+function nextLotNum(cat) {
+  const existing = lots.filter(l=>l.category===cat).map(l=>{
+    const m = l.lotId.match(/-(\d+)$/);
+    return m ? parseInt(m[1]) : 0;
+  });
+  const max = existing.length ? Math.max(...existing) : 0;
+  return String(max+1).padStart(4,'0');
+}
+
+function buildCatSelect(selectedCat='') {
+  const sel = document.getElementById('lCatSelect');
+  sel.innerHTML = '<option value="">Select…</option>' +
+    categories.map(c=>`<option value="${c}" ${c===selectedCat?'selected':''}>${c}</option>`).join('');
+}
+
+function onCatChange() {
+  const cat = document.getElementById('lCatSelect').value;
+  const preview = document.getElementById('lotIdPreview');
+  if(cat && !editLotId) {
+    const num = nextLotNum(cat);
+    preview.textContent = `${cat}-${num}`;
+    preview.style.color = 'var(--accent)';
+  } else if(editLotId) {
+    const l = lots.find(x=>x.id===editLotId);
+    preview.textContent = l?.lotId || '—';
+    preview.style.color = 'var(--muted)';
+  } else {
+    preview.textContent = '—';
+    preview.style.color = 'var(--muted)';
+  }
+}
+
+// lot modal
+function openLotModal(id=null){
+  editLotId=id;
+  document.getElementById('lotMTitle').textContent=id?'Edit Lot':'Receive New Lot';
+  buildCatSelect(id ? lots.find(x=>x.id===id)?.category : '');
+
+  const editField = document.getElementById('editLotIdField');
+  if(id){
+    const l=lots.find(x=>x.id===id);
+    document.getElementById('lDate').value=l.received;
+    document.getElementById('lNotes').value=l.notes||'';
+    document.getElementById('lLotId').value=l.lotId;
+    document.getElementById('lotIdPreview').textContent=l.lotId;
+    document.getElementById('lotIdPreview').style.color='var(--muted)';
+    editField.style.display='block';
+  } else {
+    document.getElementById('lDate').value=new Date().toISOString().split('T')[0];
+    document.getElementById('lNotes').value='';
+    document.getElementById('lotIdPreview').textContent='—';
+    document.getElementById('lotIdPreview').style.color='var(--muted)';
+    editField.style.display='none';
+  }
+  document.getElementById('lotOv').classList.add('open');
+  setTimeout(()=>document.getElementById('lCatSelect').focus(),80);
+}
+
+function closeLotModal(){ document.getElementById('lotOv').classList.remove('open'); editLotId=null; }
+
+function saveLot(){
+  const cat = document.getElementById('lCatSelect').value;
+  if(!cat){toast('Please select a design category');return;}
+
+  let lotId;
+  if(editLotId){
+    // when editing, keep the existing lotId (or allow override via the shown field)
+    lotId = document.getElementById('lLotId').value.trim() || lots.find(x=>x.id===editLotId)?.lotId;
+  } else {
+    const num = nextLotNum(cat);
+    lotId = `${cat}-${num}`;
+  }
+
+  const data={lotId, category:cat, received:document.getElementById('lDate').value, notes:document.getElementById('lNotes').value.trim()};
+  if(editLotId){const i=lots.findIndex(l=>l.id===editLotId);lots[i]={...lots[i],...data};}
+  else{const nid='L'+Date.now();lots.push({id:nid,...data});expanded.add(nid);}
+  saveAll();closeLotModal();render();toast(editLotId?'Lot updated ✓':`Lot ${lotId} received ✓`);
+}
+
+// add-category modal
+function openAddCat(){
+  document.getElementById('newCatInput').value='';
+  document.getElementById('catPreviewExample').textContent='—';
+  document.getElementById('catOv').classList.add('open');
+  setTimeout(()=>document.getElementById('newCatInput').focus(),80);
+}
+function closeCatModal(){ document.getElementById('catOv').classList.remove('open'); }
+document.addEventListener('DOMContentLoaded',()=>{
+  const inp = document.getElementById('newCatInput');
+  if(inp) inp.addEventListener('input',()=>{
+    const v=inp.value.trim().toUpperCase();
+    document.getElementById('catPreviewExample').textContent = v ? `${v}-0001, ${v}-0002, …` : '—';
+  });
+});
+function saveNewCat(){
+  const code = document.getElementById('newCatInput').value.trim().toUpperCase();
+  if(!code){toast('Category code is required');return;}
+  if(categories.includes(code)){toast(`${code} already exists`);return;}
+  categories.push(code);
+  saveAll();
+  closeCatModal();
+  buildCatSelect(code);
+  document.getElementById('lCatSelect').value=code;
+  onCatChange();
+  toast(`Category ${code} added ✓`);
+}
+
+// plate modal
+function openPlateModal(pid=null,lctx=null){
+  editPlateId=pid; lotCtx=lctx;
+  if(pid){
+    const p=plates.find(x=>x.id===pid); lotCtx=p.lotId;
+    document.getElementById('plateMTitle').textContent='Edit Coldplate';
+    document.getElementById('pSerial').value=p.serial;
+    document.getElementById('pBin').value=p.bin||'';
+    document.getElementById('pFT').value=p.flatnessTester||'';
+    document.getElementById('pLT').value=p.leakTester||'';
+    document.getElementById('pTT').value=p.thermalTester||'';
+    document.getElementById('pNotes').value=p.notes||'';
+    mF=p.flatness||'pending'; mL=p.leak||'pending'; mT=p.thermal||'pending'; mS=p.stage||'received';
+  } else {
+    const lot=lots.find(l=>l.id===lctx);
+    document.getElementById('plateMTitle').textContent=`Add to ${lot?.lotId||'Lot'}`;
+    document.getElementById('pSerial').value='';
+    document.getElementById('pBin').value='';
+    document.getElementById('pFT').value='';
+    document.getElementById('pLT').value='';
+    document.getElementById('pTT').value='';
+    document.getElementById('pNotes').value='';
+    mF='pending'; mL='pending'; mT='pending'; mS='received';
+  }
+  buildSGrid(); updateTUI();
+  document.getElementById('plateOv').classList.add('open');
+  setTimeout(()=>document.getElementById('pSerial').focus(),80);
+}
+function closePlateModal(){ document.getElementById('plateOv').classList.remove('open'); editPlateId=null; lotCtx=null; }
+function savePlate(){
+  const serial=document.getElementById('pSerial').value.trim();
+  if(!serial){toast('Serial number is required');return;}
+  const data={lotId:lotCtx,serial,bin:document.getElementById('pBin').value.trim(),stage:mS,flatness:mF,flatnessTester:document.getElementById('pFT').value.trim(),leak:mL,leakTester:document.getElementById('pLT').value.trim(),thermal:mT,thermalTester:document.getElementById('pTT').value.trim(),notes:document.getElementById('pNotes').value.trim()};
+  if(editPlateId){const i=plates.findIndex(p=>p.id===editPlateId);plates[i]={...plates[i],...data};}
+  else{plates.push({id:'P'+Date.now(),...data});}
+  saveAll();closePlateModal();render();toast(editPlateId?'Updated ✓':'Coldplate added ✓');
+}
+
+function buildSGrid(){
+  document.getElementById('sgrid').innerHTML=STAGES.map(s=>
+    `<div class="sopt ${mS===s.id?'sel':''}" style="${mS===s.id?`border-color:${s.color};background:${s.color}18;color:${s.color}`:''}" onclick="selS('${s.id}')">${s.label}</div>`
+  ).join('');
+}
+function selS(id){mS=id;buildSGrid();}
+
+function setT(w,v){ if(w==='f')mF=v; else if(w==='l')mL=v; else mT=v; updateTUI(); }
+function updateTUI(){
+  const ids={f:{p:'rf-p',f:'rf-f',n:'rf-n'},l:{p:'rl-p',f:'rl-f',n:'rl-n'},t:{p:'rt-p',f:'rt-f',n:'rt-n'}};
+  ['f','l','t'].forEach(w=>{
+    const cur=w==='f'?mF:w==='l'?mL:mT;
+    Object.values(ids[w]).forEach(id=>{const e=document.getElementById(id);if(e)e.className='ropt';});
+    const aid=cur==='pass'?ids[w].p:cur==='fail'?ids[w].f:ids[w].n;
+    const el=document.getElementById(aid);
+    if(el)el.classList.add(cur==='pass'?'cp':cur==='fail'?'cf':'cn');
+  });
+}
+
+function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2800); }
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'){closeLotModal();closePlateModal();closeCatModal();} });
+
+// App starts via showApp() triggered after Microsoft sign-in
+</script>
+</body>
+</html>
