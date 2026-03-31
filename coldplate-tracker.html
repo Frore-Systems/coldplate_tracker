@@ -310,7 +310,10 @@ body::before { content:''; position:fixed; inset:0; background-image:radial-grad
       <p id="spLabel">SharePoint · Lot &amp; Sample Lifecycle</p>
     </div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      <div class="sync-wrap"><div class="sync-dot" id="syncDot"></div><span id="syncLabel">Synced</span></div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">
+        <div class="sync-wrap"><div class="sync-dot" id="syncDot"></div><span id="syncLabel">Synced</span></div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:.58rem;color:var(--muted)" id="savePathLabel"></div>
+      </div>
       <div class="user-chip">👤 <span id="userLabel">—</span></div>
       <button class="btn-sm" onclick="signOut()">Sign out</button>
       <button class="btn btn-primary" onclick="openLotModal()">+ Receive New Lot</button>
@@ -485,8 +488,12 @@ function initMsal() {
       clientId:    CFG.clientId,
       authority:   'https://login.microsoftonline.com/organizations',
       redirectUri: getRedirectUri(),
+      postLogoutRedirectUri: getRedirectUri(),
     },
-    cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: false }
+    cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: false },
+    system: {
+      allowRedirectInIframe: true,
+    }
   });
 }
 
@@ -522,7 +529,10 @@ async function startSignIn() {
   waitForMsal(async () => {
     initMsal();
     try {
-      const resp = await msalApp.loginPopup({ scopes: SCOPES });
+      const resp = await msalApp.loginPopup({
+        scopes: SCOPES,
+        redirectUri: getRedirectUri(),
+      });
       currentUser = resp.account.username;
       await showApp();
     } catch(e) {
@@ -653,6 +663,9 @@ async function showApp() {
   document.getElementById('userLabel').textContent = currentUser || 'Signed in';
   const host = new URL(CFG.siteUrl).hostname.split('.')[0];
   document.getElementById('spLabel').textContent = `${host} SharePoint · Lot & Sample Lifecycle`;
+  // Show exact save path
+  const savePath = `${CFG.siteUrl}${CFG.folderPath}/coldplate-data.json`;
+  document.getElementById('savePathLabel').textContent = `Data: ${savePath}`;
   await loadFromSharePoint();
 }
 
