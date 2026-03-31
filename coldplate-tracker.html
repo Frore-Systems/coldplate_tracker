@@ -575,11 +575,11 @@ async function graphPut(url, body) {
 // ── SHAREPOINT FILE OPERATIONS ──
 async function getSiteId() {
   if (spSiteId) return spSiteId;
-  // Parse host and site path from siteUrl
   const url = new URL(CFG.siteUrl);
-  const host = url.hostname;
-  const sitePath = url.pathname; // e.g. /sites/mysite
-  const data = await graphGet(`/sites/${host}:${sitePath}`);
+  const host = url.hostname;                // froresystemscom.sharepoint.com
+  const sitePath = url.pathname.replace(/^\//, ''); // sites/RnD  (no leading slash)
+  // Correct Graph API format: /sites/hostname:/sitepath:
+  const data = await graphGet(`/sites/${host}:/${sitePath}:`);
   spSiteId = data.id;
   return spSiteId;
 }
