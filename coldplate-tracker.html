@@ -5,7 +5,73 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Coldplate Tracker</title>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
+<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js" onerror="msalLoadFailed=true"></script>
+<script>
+// Inline PKCE OAuth flow — no library dependency
+window.msalLoadFailed = false;
+
+const OAuthHelper = {
+  async sha256(plain) {
+    const enc = new TextEncoder().encode(plain);
+    const hash = await crypto.subtle.digest('SHA-256', enc);
+    return btoa(String.fromCharCode(...new Uint8Array(hash)))
+      .replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+  },
+  randomString(len=64) {
+    const arr = new Uint8Array(len);
+    crypto.getRandomValues(arr);
+    return btoa(String.fromCharCode(...arr)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'').slice(0,len);
+  },
+  async startFlow(clientId, redirectUri) {
+    const verifier  = this.randomString(64);
+    const challenge = await this.sha256(verifier);
+    const state     = this.randomString(16);
+    sessionStorage.setItem('pkce_verifier', verifier);
+    sessionStorage.setItem('pkce_state',    state);
+    const params = new URLSearchParams({
+      client_id:             clientId,
+      response_type:         'code',
+      redirect_uri:          redirectUri,
+      response_mode:         'query',
+      scope:                 'https://graph.microsoft.com/Sites.ReadWrite.All https://graph.microsoft.com/User.Read offline_access',
+      state,
+      code_challenge:        challenge,
+      code_challenge_method: 'S256',
+    });
+    window.location.href = `https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize?${params}`;
+  },
+  async exchangeCode(clientId, redirectUri, code) {
+    const verifier = sessionStorage.getItem('pkce_verifier');
+    const body = new URLSearchParams({
+      client_id:     clientId,
+      grant_type:    'authorization_code',
+      code,
+      redirect_uri:  redirectUri,
+      code_verifier: verifier,
+    });
+    const r = await fetch('https://login.microsoftonline.com/organizations/oauth2/v2.0/token', {
+      method:'POST', body, headers:{'Content-Type':'application/x-www-form-urlencoded'}
+    });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error_description || data.error);
+    return data;
+  },
+  async refreshToken(clientId, refreshTok) {
+    const body = new URLSearchParams({
+      client_id:     clientId,
+      grant_type:    'refresh_token',
+      refresh_token: refreshTok,
+      scope:         'https://graph.microsoft.com/Sites.ReadWrite.All https://graph.microsoft.com/User.Read offline_access',
+    });
+    const r = await fetch('https://login.microsoftonline.com/organizations/oauth2/v2.0/token', {
+      method:'POST', body, headers:{'Content-Type':'application/x-www-form-urlencoded'}
+    });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error_description || data.error);
+    return data;
+  }
+};
+</script>
 <style>
 /* ── SETUP SCREEN ── */
 .setup-screen { min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px; position:relative; z-index:1; }
@@ -391,38 +457,80 @@ let CFG = {
   folderPath: localStorage.getItem('cp_folderPath')  || '',
 };
 
-const SCOPES = ['Sites.ReadWrite.All', 'User.Read'];
 const FILE_NAME = 'coldplate-data.json';
+let accessToken   = null;
+let refreshTok    = null;
+let tokenExpiry   = 0;
+let spSiteId      = null;
+let currentUser   = '';
 
-let msalInstance = null;
-let msalAccount  = null;
-let spSiteId     = null; // resolved once after login
-
-// ── MSAL INIT ──
-function initMsal(clientId) {
-  msalInstance = new msal.PublicClientApplication({
-    auth: {
-      clientId,
-      authority: 'https://login.microsoftonline.com/organizations',
-      redirectUri: window.location.href.split('?')[0].split('#')[0],
-    },
-    cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: false }
-  });
+function getRedirectUri() {
+  return window.location.href.split('?')[0].split('#')[0];
 }
 
+// ── HANDLE AUTH CALLBACK ──
 window.addEventListener('load', async () => {
-  if (CFG.clientId) {
-    document.getElementById('cfgClientId').value   = CFG.clientId;
-    document.getElementById('cfgSiteUrl').value    = CFG.siteUrl;
-    document.getElementById('cfgFolderPath').value = CFG.folderPath;
-    initMsal(CFG.clientId);
+  // Pre-fill saved config
+  if (CFG.clientId)   document.getElementById('cfgClientId').value   = CFG.clientId;
+  if (CFG.siteUrl)    document.getElementById('cfgSiteUrl').value    = CFG.siteUrl;
+  if (CFG.folderPath) document.getElementById('cfgFolderPath').value = CFG.folderPath;
+
+  const params = new URLSearchParams(window.location.search);
+  const code   = params.get('code');
+  const state  = params.get('state');
+
+  if (code && state && state === sessionStorage.getItem('pkce_state')) {
+    // We're back from Microsoft login — exchange code for token
+    history.replaceState({}, '', window.location.pathname);
     try {
-      await msalInstance.handleRedirectPromise();
-      const accounts = msalInstance.getAllAccounts();
-      if (accounts.length > 0) { msalAccount = accounts[0]; await showApp(); }
-    } catch(e) { console.warn(e); }
+      const tokens = await OAuthHelper.exchangeCode(CFG.clientId, getRedirectUri(), code);
+      saveTokens(tokens);
+      await showApp();
+    } catch(e) {
+      alert('Sign-in failed: ' + e.message);
+    }
+    return;
+  }
+
+  // Check for saved refresh token
+  const saved = localStorage.getItem('cp_refresh');
+  if (saved && CFG.clientId) {
+    try {
+      const tokens = await OAuthHelper.refreshToken(CFG.clientId, saved);
+      saveTokens(tokens);
+      await showApp();
+    } catch(e) {
+      localStorage.removeItem('cp_refresh');
+    }
   }
 });
+
+function saveTokens(tokens) {
+  accessToken = tokens.access_token;
+  tokenExpiry = Date.now() + (tokens.expires_in - 60) * 1000;
+  if (tokens.refresh_token) {
+    refreshTok = tokens.refresh_token;
+    localStorage.setItem('cp_refresh', refreshTok);
+  }
+  // Decode user from id_token
+  try {
+    const payload = JSON.parse(atob(tokens.id_token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));
+    currentUser = payload.preferred_username || payload.upn || payload.email || '';
+  } catch(e) { currentUser = ''; }
+}
+
+async function getToken() {
+  if (accessToken && Date.now() < tokenExpiry) return accessToken;
+  if (refreshTok) {
+    try {
+      const tokens = await OAuthHelper.refreshToken(CFG.clientId, refreshTok);
+      saveTokens(tokens);
+      return accessToken;
+    } catch(e) { /* fall through to re-login */ }
+  }
+  // Need to re-authenticate
+  await OAuthHelper.startFlow(CFG.clientId, getRedirectUri());
+}
 
 async function startSignIn() {
   const clientId   = document.getElementById('cfgClientId').value.trim();
@@ -433,29 +541,16 @@ async function startSignIn() {
   localStorage.setItem('cp_siteUrl',    siteUrl);
   localStorage.setItem('cp_folderPath', folderPath);
   CFG = { clientId, siteUrl, folderPath };
-  initMsal(clientId);
-  try {
-    const resp = await msalInstance.loginPopup({ scopes: SCOPES });
-    msalAccount = resp.account;
-    await showApp();
-  } catch(e) { alert('Sign-in failed: ' + e.message); }
+  await OAuthHelper.startFlow(clientId, getRedirectUri());
 }
 
 function signOut() {
-  msalInstance.logoutPopup({ account: msalAccount });
-  msalAccount = null; spSiteId = null;
-  document.getElementById('appScreen').style.display = 'none';
+  localStorage.removeItem('cp_refresh');
+  accessToken = null; refreshTok = null; spSiteId = null;
+  document.getElementById('appScreen').style.display  = 'none';
   document.getElementById('setupScreen').style.display = 'flex';
-}
-
-async function getToken() {
-  try {
-    const r = await msalInstance.acquireTokenSilent({ scopes: SCOPES, account: msalAccount });
-    return r.accessToken;
-  } catch {
-    const r = await msalInstance.acquireTokenPopup({ scopes: SCOPES });
-    return r.accessToken;
-  }
+  // Also redirect to Microsoft logout
+  window.location.href = `https://login.microsoftonline.com/organizations/oauth2/v2.0/logout?post_logout_redirect_uri=${encodeURIComponent(getRedirectUri())}`;
 }
 
 // ── GRAPH HELPERS ──
@@ -555,7 +650,7 @@ async function saveAll() {
 async function showApp() {
   document.getElementById('setupScreen').style.display = 'none';
   document.getElementById('appScreen').style.display   = 'block';
-  document.getElementById('userLabel').textContent = msalAccount.username;
+  document.getElementById('userLabel').textContent = currentUser || 'Signed in';
   const host = new URL(CFG.siteUrl).hostname.split('.')[0];
   document.getElementById('spLabel').textContent = `${host} SharePoint · Lot & Sample Lifecycle`;
   await loadFromSharePoint();
