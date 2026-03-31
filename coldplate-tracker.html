@@ -115,6 +115,7 @@ var st,ct,ut,lt,dt,ht,pt,gt,ft,mt=function(){function t(e,t,r){this.networkInter
   --text:#1a1916; --muted:#888580; --accent:#1a5cff; --accent-lt:#e8eeff;
   --s-received:#6b7280; --s-binned:#d97706; --s-flatness:#7c3aed;
   --s-leak:#0e7490; --s-thermal:#0891b2; --s-complete:#16a34a; --s-failed:#dc2626;
+  --s-reliability:#b45309;
 }
 
 body { font-family:'IBM Plex Sans',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
@@ -131,7 +132,7 @@ body::before { content:''; position:fixed; inset:0; background-image:radial-grad
 .btn-primary:hover { filter:brightness(1.1); transform:translateY(-1px); box-shadow:0 4px 14px rgba(26,92,255,.25); }
 
 /* summary strip */
-.strip { display:grid; grid-template-columns:repeat(7,1fr); border:1px solid var(--border); background:var(--surface); margin-bottom:24px; overflow:hidden; }
+.strip { display:grid; grid-template-columns:repeat(8,1fr); border:1px solid var(--border); background:var(--surface); margin-bottom:24px; overflow:hidden; }
 .strip-cell { padding:14px; border-right:1px solid var(--border); cursor:pointer; transition:background .12s; position:relative; }
 .strip-cell:last-child { border-right:none; }
 .strip-cell:hover { background:var(--surface2); }
@@ -445,6 +446,66 @@ body::before { content:''; position:fixed; inset:0; background-image:radial-grad
   </div>
 </div>
 
+<!-- RELIABILITY MODAL -->
+<div class="ov" id="relOv" onclick="if(event.target===this)closeRelModal()">
+  <div class="modal" style="max-width:560px">
+    <div class="mhead">
+      <h2 id="relModalTitle">Reliability Tests</h2>
+      <button class="mclose" onclick="closeRelModal()">✕</button>
+    </div>
+    <div class="mbody">
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:.7rem;color:var(--muted);margin-bottom:4px">Add reliability tests for this plate. Each test has a category and a Pass/Fail result.</div>
+
+      <!-- existing tests -->
+      <div id="relTestList"></div>
+
+      <!-- add new test -->
+      <div class="sec">Add Test</div>
+      <div class="frow">
+        <div class="ff">
+          <label>Test Category</label>
+          <div style="display:flex;gap:6px">
+            <select id="relCatSelect" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:.82rem;padding:9px 11px;outline:none;appearance:none;">
+              <option value="">Select…</option>
+            </select>
+            <button onclick="openAddRelCat()" title="Add category" style="background:var(--surface2);border:1px solid var(--border);color:var(--muted);font-size:1rem;width:38px;cursor:pointer;transition:all .12s;flex-shrink:0;" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">+</button>
+          </div>
+        </div>
+        <div class="ff">
+          <label>Result</label>
+          <div class="rrow" style="margin-top:2px">
+            <div class="ropt" id="rrel-n" onclick="setRelResult('pending')">— Pend</div>
+            <div class="ropt" id="rrel-p" onclick="setRelResult('pass')">✓ Pass</div>
+            <div class="ropt" id="rrel-f" onclick="setRelResult('fail')">✕ Fail</div>
+          </div>
+        </div>
+      </div>
+      <button onclick="addRelTest()" style="background:var(--text);border:none;color:#fff;font-family:'IBM Plex Mono',monospace;font-size:.75rem;padding:8px 18px;cursor:pointer;margin-top:4px">+ Add Test</button>
+    </div>
+    <div class="mfoot">
+      <button class="btn-cancel" onclick="closeRelModal()">Close</button>
+      <button class="btn-save" onclick="saveRelTests()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADD RELIABILITY CATEGORY MODAL -->
+<div class="ov" id="relCatOv" onclick="if(event.target===this)closeRelCatModal()" style="z-index:300">
+  <div class="modal" style="max-width:360px">
+    <div class="mhead"><h2>Add Reliability Category</h2><button class="mclose" onclick="closeRelCatModal()">✕</button></div>
+    <div class="mbody">
+      <div class="ff">
+        <label>Category Name *</label>
+        <input type="text" id="newRelCatInput" placeholder="e.g. Vibration, Drop Test, Thermal Cycling">
+      </div>
+    </div>
+    <div class="mfoot">
+      <button class="btn-cancel" onclick="closeRelCatModal()">Cancel</button>
+      <button class="btn-save" onclick="saveNewRelCat()">Add</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -452,10 +513,11 @@ const STAGES = [
   {id:'received', label:'Received', color:'var(--s-received)'},
   {id:'binned',   label:'Binned',   color:'var(--s-binned)'},
   {id:'flatness', label:'Flatness', color:'var(--s-flatness)'},
-  {id:'leak',     label:'Leak',     color:'var(--s-leak)'},
-  {id:'thermal',  label:'Thermal',  color:'var(--s-thermal)'},
-  {id:'complete', label:'Complete', color:'var(--s-complete)'},
-  {id:'failed',   label:'Failed',   color:'var(--s-failed)'},
+  {id:'leak',     label:'Leak',        color:'var(--s-leak)'},
+  {id:'thermal',  label:'Thermal',     color:'var(--s-thermal)'},
+  {id:'complete', label:'Complete',    color:'var(--s-complete)'},
+  {id:'failed',   label:'Failed',      color:'var(--s-failed)'},
+  {id:'reliability',label:'Reliability',color:'var(--s-reliability)'},
 ];
 const FLOW = ['received','binned','flatness','leak','thermal','complete'];
 
@@ -594,11 +656,9 @@ async function getSiteId() {
   return spSiteId;
 }
 
-async function getFileUrl() {
-  const siteId = await getSiteId();
-  const folder = CFG.folderPath; // e.g. /Shared Documents/Coldplate Lab
-  const encodedPath = encodeURIComponent(folder + '/' + FILE_NAME).replace(/%2F/g, '/');
-  return `/sites/${siteId}/drive/root:${encodedPath}:/content`;
+// Encode a file path for Graph API — encode spaces but keep slashes
+function encodePath(path) {
+  return path.split('/').map(segment => encodeURIComponent(segment)).join('/');
 }
 
 async function loadFromSharePoint() {
@@ -606,25 +666,24 @@ async function loadFromSharePoint() {
   showSkeleton();
   try {
     const siteId = await getSiteId();
-    const folder = CFG.folderPath;
-    const encodedPath = encodeURIComponent(folder + '/' + FILE_NAME).replace(/%2F/g, '/');
+    const fullPath = CFG.folderPath + '/' + FILE_NAME;
+    const encodedPath = encodePath(fullPath);
     const metaUrl = `/sites/${siteId}/drive/root:${encodedPath}`;
     let raw;
     try {
       const meta = await graphGet(metaUrl);
-      // Download the file content
       const token = await getToken();
       const r = await fetch(meta['@microsoft.graph.downloadUrl'] || `https://graph.microsoft.com/v1.0${metaUrl}:/content`, {
         headers: { Authorization: 'Bearer ' + token }
       });
       raw = await r.json();
     } catch(e) {
-      // File doesn't exist yet — start fresh
-      raw = { categories: ['60AA','60AB','61AA'], lots: [], plates: [] };
+      raw = { categories: ['60AA','60AB','61AA'], relCategories: ['Vibration','Thermal Cycling','Drop Test'], lots: [], plates: [] };
     }
-    categories = raw.categories || ['60AA','60AB','61AA'];
-    lots       = raw.lots       || [];
-    plates     = raw.plates     || [];
+    categories    = raw.categories    || ['60AA','60AB','61AA'];
+    relCategories = raw.relCategories || ['Vibration','Thermal Cycling','Drop Test'];
+    lots          = raw.lots          || [];
+    plates        = raw.plates        || [];
     render();
   } catch(e) {
     toast('Load failed: ' + e.message);
@@ -638,10 +697,10 @@ async function saveAll() {
   setSyncing(true);
   try {
     const siteId = await getSiteId();
-    const folder = CFG.folderPath;
-    const encodedPath = encodeURIComponent(folder + '/' + FILE_NAME).replace(/%2F/g, '/');
+    const fullPath = CFG.folderPath + '/' + FILE_NAME;
+    const encodedPath = encodePath(fullPath);
     const uploadUrl = `/sites/${siteId}/drive/root:${encodedPath}:/content`;
-    const payload = JSON.stringify({ categories, lots, plates }, null, 2);
+    const payload = JSON.stringify({ categories, relCategories, lots, plates }, null, 2);
     const token = await getToken();
     const r = await fetch('https://graph.microsoft.com/v1.0' + uploadUrl, {
       method: 'PUT',
@@ -685,6 +744,7 @@ function showSkeleton() {
 
 // ── DATA STATE (populated from SharePoint) ──
 let categories = [];
+let relCategories = [];
 let lots   = [];
 let plates = [];
 
@@ -771,6 +831,30 @@ function renderLots() {
 
 function plateRow(p,i) {
   const st=si(p.stage), nxt=nextS(p.stage);
+  const isRel = p.stage === 'reliability';
+
+  if (isRel) {
+    const tests = p.reliabilityTests || [];
+    const passCount = tests.filter(t=>t.result==='pass').length;
+    const failCount = tests.filter(t=>t.result==='fail').length;
+    return `<div class="pt-row" style="animation-delay:${i*.025}s;grid-template-columns:130px 85px 1fr 110px 80px">
+      <div class="serial">${p.serial}</div>
+      <div>${p.bin?`<span class="bin-badge">📦 ${p.bin}</span>`:'<span style="color:var(--muted);font-size:.7rem">—</span>'}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center">
+        ${tests.length ? tests.map(t=>{
+          const cls=t.result==='pass'?'tp':t.result==='fail'?'tf':'tn';
+          const icon=t.result==='pass'?'✓':t.result==='fail'?'✕':'–';
+          return `<span style="display:inline-flex;align-items:center;gap:3px;font-family:'IBM Plex Mono',monospace;font-size:.65rem;padding:2px 7px;border:1px solid var(--border);background:var(--surface2)"><span class="tbadge ${cls}" style="width:16px;height:16px;font-size:.55rem">${icon}</span>${t.category}</span>`;
+        }).join('') : `<span style="font-family:'IBM Plex Mono',monospace;font-size:.68rem;color:var(--muted);font-style:italic">No tests yet</span>`}
+      </div>
+      <div><span class="stage-chip" style="border-color:${st.color};color:${st.color}"><span style="width:5px;height:5px;border-radius:50%;background:${st.color};display:inline-block;margin-right:3px"></span>${st.label}</span></div>
+      <div class="pact">
+        <button class="ibtn" title="Manage reliability tests" style="color:var(--s-reliability);border-color:var(--s-reliability)" onclick="openReliabilityModal('${p.id}')">⚗</button>
+        <button class="ibtn del" title="Delete" onclick="delPlate('${p.id}')">✕</button>
+      </div>
+    </div>`;
+  }
+
   const bf=p.flatness==='pass'?'tp':p.flatness==='fail'?'tf':'tn';
   const bl=p.leak==='pass'?'tp':p.leak==='fail'?'tf':'tn';
   const bt=p.thermal==='pass'?'tp':p.thermal==='fail'?'tf':'tn';
@@ -795,7 +879,8 @@ function plateRow(p,i) {
     <div><span class="stage-chip" style="border-color:${st.color};color:${st.color}"><span style="width:5px;height:5px;border-radius:50%;background:${st.color};display:inline-block;margin-right:3px"></span>${st.label}</span></div>
     <div class="pact">
       <button class="ibtn" title="Edit" onclick="openPlateModal('${p.id}')">✎</button>
-      ${nxt&&p.stage!=='failed'?`<button class="ibtn" title="Advance to ${si(nxt).label}" onclick="advance('${p.id}')">→</button>`:''}
+      ${nxt&&p.stage!=='failed'&&p.stage!=='reliability'?`<button class="ibtn" title="Advance to ${si(nxt).label}" onclick="advance('${p.id}')">→</button>`:''}
+      ${p.stage!=='reliability'&&p.stage!=='complete'&&p.stage!=='failed'?`<button class="ibtn" title="Send to Reliability" style="color:var(--s-reliability);border-color:var(--s-reliability)" onclick="sendToReliability('${p.id}')">⚗</button>`:''}
       <button class="ibtn del" title="Delete" onclick="delPlate('${p.id}')">✕</button>
     </div>
   </div>`;
@@ -987,8 +1072,126 @@ function updateTUI(){
   });
 }
 
-function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2800); }
-document.addEventListener('keydown',e=>{ if(e.key==='Escape'){closeLotModal();closePlateModal();closeCatModal();} });
+// ── RELIABILITY ──
+let relCategories = []; // saved in data alongside categories/lots/plates
+let editingRelPlateId = null;
+let pendingRelTests = []; // tests being edited in modal
+let mRelResult = 'pending';
+
+function sendToReliability(id) {
+  if (!confirm('Send this coldplate to Reliability? It will leave the normal lifecycle.')) return;
+  const p = plates.find(x=>x.id===id);
+  if (!p) return;
+  p.stage = 'reliability';
+  if (!p.reliabilityTests) p.reliabilityTests = [];
+  saveAll(); render();
+  toast(`${p.serial} → Reliability`);
+  // Open reliability modal immediately
+  openReliabilityModal(id);
+}
+
+function openReliabilityModal(id) {
+  editingRelPlateId = id;
+  const p = plates.find(x=>x.id===id);
+  document.getElementById('relModalTitle').textContent = `Reliability: ${p.serial}`;
+  pendingRelTests = JSON.parse(JSON.stringify(p.reliabilityTests || []));
+  mRelResult = 'pending';
+  buildRelCatSelect();
+  updateRelUI();
+  renderRelTestList();
+  document.getElementById('relOv').classList.add('open');
+}
+
+function closeRelModal() {
+  document.getElementById('relOv').classList.remove('open');
+  editingRelPlateId = null;
+}
+
+function buildRelCatSelect(sel='') {
+  document.getElementById('relCatSelect').innerHTML =
+    '<option value="">Select…</option>' +
+    relCategories.map(c=>`<option value="${c}" ${c===sel?'selected':''}>${c}</option>`).join('');
+}
+
+function setRelResult(val) {
+  mRelResult = val;
+  updateRelUI();
+}
+
+function updateRelUI() {
+  ['pending','pass','fail'].forEach(v => {
+    const id = v==='pending'?'rrel-n':v==='pass'?'rrel-p':'rrel-f';
+    const el = document.getElementById(id);
+    if (el) el.className = 'ropt';
+  });
+  const activeId = mRelResult==='pass'?'rrel-p':mRelResult==='fail'?'rrel-f':'rrel-n';
+  const el = document.getElementById(activeId);
+  if (el) el.classList.add(mRelResult==='pass'?'cp':mRelResult==='fail'?'cf':'cn');
+}
+
+function renderRelTestList() {
+  const el = document.getElementById('relTestList');
+  if (!pendingRelTests.length) {
+    el.innerHTML = `<div style="font-family:'IBM Plex Mono',monospace;font-size:.7rem;color:var(--muted);padding:10px 0;font-style:italic">No tests added yet.</div>`;
+    return;
+  }
+  el.innerHTML = `<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">` +
+    pendingRelTests.map((t,i) => {
+      const cls = t.result==='pass'?'tp':t.result==='fail'?'tf':'tn';
+      const icon = t.result==='pass'?'✓':t.result==='fail'?'✕':'–';
+      return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--surface2);border:1px solid var(--border)">
+        <div class="tbadge ${cls}">${icon}</div>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:.78rem;flex:1">${t.category}</span>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:.68rem;color:var(--muted)">${t.result}</span>
+        <button onclick="removeRelTest(${i})" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:.8rem;padding:2px 4px" onmouseover="this.style.color='#dc2626'" onmouseout="this.style.color='var(--muted)'">✕</button>
+      </div>`;
+    }).join('') + '</div>';
+}
+
+function addRelTest() {
+  const cat = document.getElementById('relCatSelect').value;
+  if (!cat) { toast('Please select a category'); return; }
+  pendingRelTests.push({ category: cat, result: mRelResult });
+  mRelResult = 'pending';
+  updateRelUI();
+  document.getElementById('relCatSelect').value = '';
+  renderRelTestList();
+}
+
+function removeRelTest(i) {
+  pendingRelTests.splice(i, 1);
+  renderRelTestList();
+}
+
+function saveRelTests() {
+  const p = plates.find(x=>x.id===editingRelPlateId);
+  if (p) {
+    p.reliabilityTests = [...pendingRelTests];
+    saveAll(); render();
+    toast('Reliability tests saved ✓');
+  }
+  closeRelModal();
+}
+
+// Add reliability category
+function openAddRelCat() {
+  document.getElementById('newRelCatInput').value = '';
+  document.getElementById('relCatOv').classList.add('open');
+  setTimeout(() => document.getElementById('newRelCatInput').focus(), 80);
+}
+function closeRelCatModal() { document.getElementById('relCatOv').classList.remove('open'); }
+function saveNewRelCat() {
+  const code = document.getElementById('newRelCatInput').value.trim();
+  if (!code) { toast('Category name is required'); return; }
+  if (relCategories.includes(code)) { toast(`${code} already exists`); return; }
+  relCategories.push(code);
+  saveAll();
+  closeRelCatModal();
+  buildRelCatSelect(code);
+  document.getElementById('relCatSelect').value = code;
+  toast(`Category "${code}" added ✓`);
+}
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'){closeLotModal();closePlateModal();closeCatModal();closeRelModal();closeRelCatModal();} });
 
 // App starts via showApp() triggered after Microsoft sign-in
 </script>
