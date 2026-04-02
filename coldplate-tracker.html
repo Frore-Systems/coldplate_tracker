@@ -314,17 +314,34 @@ body::before { content:''; position:fixed; inset:0; background-image:radial-grad
       <div class="sync-wrap"><div class="sync-dot" id="syncDot"></div><span id="syncLabel">Synced</span></div>
       <div class="user-chip">👤 <span id="userLabel">—</span></div>
       <button class="btn-sm" onclick="signOut()">Sign out</button>
+      <button class="btn btn-secondary" style="font-family:'IBM Plex Mono',monospace;font-size:.76rem;padding:9px 18px;cursor:pointer;transition:all .15s;" onclick="downloadCSV()">⬇ CSV</button>
+      <button class="btn btn-secondary" style="font-family:'IBM Plex Mono',monospace;font-size:.76rem;padding:9px 18px;cursor:pointer;transition:all .15s;" onclick="downloadBackup()">💾 Backup</button>
       <button class="btn btn-primary" onclick="openLotModal()">+ Receive New Lot</button>
     </div>
   </div>
 
   <div class="strip" id="strip"></div>
 
-  <div class="controls">
-    <div class="sw"><span class="si">⌕</span><input type="text" id="q" placeholder="Search lot ID or serial number…" oninput="render()"></div>
+  <div class="app-body">
+    <div class="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-title">Lots</div>
+        <input class="scan-input" id="lotSearch" placeholder="Type or scan lot ID…" oninput="filterSidebarLots()" onkeydown="if(event.key==='Enter')selectFirstLot()">
+        <div id="sidebarLots"></div>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-title">Bins</div>
+        <input class="scan-input" id="binSearch" placeholder="Type or scan bin ID…" oninput="filterSidebarBins()" onkeydown="if(event.key==='Enter')selectFirstBin()">
+        <div id="sidebarBins"></div>
+      </div>
+    </div>
+    <div class="main-content">
+      <div class="controls">
+        <div class="sw"><span class="si">⌕</span><input type="text" id="q" placeholder="Search lot ID or serial number…" oninput="render()"></div>
+      </div>
+      <div id="lotList"></div>
+    </div>
   </div>
-
-  <div id="lotList"></div>
 </div>
 </div>
 
@@ -395,8 +412,10 @@ body::before { content:''; position:fixed; inset:0; background-image:radial-grad
     <div class="mbody">
       <div class="frow">
         <div class="ff"><label>Serial Number *</label><input type="text" id="pSerial" placeholder="e.g. SN-00142"></div>
-        <div class="ff"><label>Bin Location</label><input type="text" id="pBin" placeholder="e.g. BIN-A3"></div>
+        <div class="ff"><label>Bin</label><select id="pBin" style="background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:.82rem;padding:9px 11px;outline:none;appearance:none;"><option value="">No bin</option></select></div>
       </div>
+
+      <div class="frow single"><div class="ff"><label>Design ID</label><input type="text" id="pDesign" placeholder="e.g. D-2024-001"></div></div>
 
       <div class="sec">Stage</div>
       <div class="sgrid" id="sgrid"></div>
@@ -411,6 +430,7 @@ body::before { content:''; position:fixed; inset:0; background-image:radial-grad
             <div class="ropt" id="rf-f" onclick="setT('f','fail')">✕ Fail</div>
           </div>
           <div class="ff"><label>Tested By</label><input type="text" id="pFT" placeholder="Name"></div>
+          <div class="ff"><label>Value (optional)</label><input type="number" id="pFV" placeholder="e.g. 0.05" step="any"></div>
         </div>
         <div class="tblock">
           <div class="tblock-title">💧 Leak</div>
@@ -420,6 +440,7 @@ body::before { content:''; position:fixed; inset:0; background-image:radial-grad
             <div class="ropt" id="rl-f" onclick="setT('l','fail')">✕ Fail</div>
           </div>
           <div class="ff"><label>Tested By</label><input type="text" id="pLT" placeholder="Name"></div>
+          <div class="ff"><label>Value (optional)</label><input type="number" id="pLV" placeholder="e.g. 0.0" step="any"></div>
         </div>
         <div class="tblock">
           <div class="tblock-title">🌡 Thermal</div>
@@ -429,6 +450,7 @@ body::before { content:''; position:fixed; inset:0; background-image:radial-grad
             <div class="ropt" id="rt-f" onclick="setT('t','fail')">✕ Fail</div>
           </div>
           <div class="ff"><label>Tested By</label><input type="text" id="pTT" placeholder="Name"></div>
+          <div class="ff"><label>Value (optional)</label><input type="number" id="pTV" placeholder="e.g. 25.3" step="any"></div>
         </div>
       </div>
 
@@ -620,6 +642,7 @@ async function loadFromSharePoint() {
     categories    = raw.categories    || ['60AA','60AB','61AA'];
     relCategories = raw.relCategories || ['Vibration','Thermal Cycling','Drop Test'];
     lots          = raw.lots          || [];
+    bins          = raw.bins          || [];
     plates        = raw.plates        || [];
     render();
   } catch(e) {
@@ -637,7 +660,7 @@ async function saveAll() {
     const fullPath = CFG.folderPath + '/' + FILE_NAME;
     const encodedPath = encodePath(fullPath);
     const uploadUrl = `/sites/${siteId}/drive/root:${encodedPath}:/content`;
-    const payload = JSON.stringify({ categories, relCategories, lots, plates }, null, 2);
+    const payload = JSON.stringify({ categories, relCategories, lots, bins, plates }, null, 2);
     const token = await getToken();
     const r = await fetch('https://graph.microsoft.com/v1.0' + uploadUrl, {
       method: 'PUT',
@@ -646,6 +669,8 @@ async function saveAll() {
     });
     if (!r.ok) throw new Error(await r.text());
     toast('Saved to SharePoint ✓');
+    // Write dated backup
+    writeBackup(siteId, encodedPath, payload).catch(e=>console.warn('Backup failed:', e));
   } catch(e) {
     toast('Save failed: ' + e.message);
   }
@@ -680,12 +705,15 @@ function showSkeleton() {
 let categories = [];
 let relCategories = [];
 let lots   = [];
+let bins   = [];
 let plates = [];
+let lotFilt = null;
+let binFilt = null;
 
 let sfilt = null;
 let expanded = new Set(lots.map(l=>l.id));
 let editLotId = null, editPlateId = null, lotCtx = null;
-let mF='pending', mL='pending', mT='pending', mS='received';
+let mF='pending', mL='pending', mT='pending', mS='binned';
 
 const si = id => STAGES.find(s=>s.id===id)||STAGES[0];
 const nextS = id => { const i=FLOW.indexOf(id); return i>=0&&i<FLOW.length-1?FLOW[i+1]:null; };
@@ -697,8 +725,216 @@ function prog(lid) {
   return{pct:Math.round(done/ps.length*100),done,tot:ps.length};
 }
 
+
+
+
+// ── BACKUP ──
+async function writeBackup(siteId, mainEncodedPath, payload) {
+  const today = new Date().toISOString().slice(0,10);
+  const backupName = 'coldplate-backup-' + today + '.json';
+  const backupPath = encodePath(CFG.folderPath + '/' + backupName);
+  const uploadUrl = '/sites/' + siteId + '/drive/root:' + backupPath + ':/content';
+  const token = await getToken();
+  await fetch('https://graph.microsoft.com/v1.0' + uploadUrl, {
+    method: 'PUT',
+    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: payload
+  });
+}
+
+function downloadBackup() {
+  const payload = JSON.stringify({ categories, relCategories, lots, bins, plates }, null, 2);
+  const blob = new Blob([payload], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'coldplate-backup-' + new Date().toISOString().slice(0,10) + '.json';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('Backup downloaded ✓');
+}
+
+// ── PORTED FEATURES: bins, sidebar, CSV ──
+function flatnessColor(val) {
+  if (val === '' || val === null || val === undefined) return '';
+  const n = parseFloat(val);
+  if (isNaN(n)) return '';
+  if (n > 50) return 'color:#dc2626;font-weight:600';
+  if (n >= 40) return 'color:#d97706;font-weight:600';
+  return 'color:#16a34a;font-weight:600';
+}
+
+function renderSidebar() {
+  var lotQ = (document.getElementById('lotSearch')||{}).value||'';
+  var binQ = (document.getElementById('binSearch')||{}).value||'';
+
+  var lotsEl = document.getElementById('sidebarLots');
+  if (!lotsEl) return;
+  var filtLots = lots.filter(function(l){ return !lotQ || l.lotId.toLowerCase().includes(lotQ.toLowerCase()); });
+  if (!filtLots.length) {
+    lotsEl.innerHTML = '<div class="filter-item" style="color:var(--muted);font-style:italic">No lots found</div>';
+  } else {
+    lotsEl.innerHTML = filtLots.map(function(l) {
+      var active = lotFilt === l.id;
+      var count = plates.filter(function(p){ return p.lotId===l.id; }).length;
+      var cls = 'filter-item' + (active ? ' active' : '');
+      return '<div class="' + cls + '" onclick="toggleLotFilt(\'' + l.id + '\')">' +
+        '<span style="flex:1">' + l.lotId + '</span>' +
+        '<span style="font-size:.65rem;color:' + (active?'var(--accent)':'var(--muted)') + '">' + count + '</span>' +
+        '</div>';
+    }).join('');
+  }
+
+  var binsEl = document.getElementById('sidebarBins');
+  var baseBins = lotFilt ? bins.filter(function(b){ return b.lotId===lotFilt; }) : bins;
+  var filtBins = baseBins.filter(function(b){ return !binQ || b.binId.toLowerCase().includes(binQ.toLowerCase()); });
+  if (!filtBins.length) {
+    binsEl.innerHTML = '<div class="filter-item" style="color:var(--muted);font-style:italic">' + (baseBins.length?'No bins match':'No bins yet') + '</div>';
+  } else {
+    binsEl.innerHTML = filtBins.map(function(b) {
+      var active = binFilt === b.id;
+      var count = plates.filter(function(p){ return p.binId===b.id; }).length;
+      var cls = 'filter-item' + (active ? ' active' : '');
+      return '<div class="' + cls + '" onclick="toggleBinFilt(\'' + b.id + '\')">' +
+        '<span style="flex:1;font-size:.68rem">' + b.binId + '</span>' +
+        '<span style="font-size:.65rem;color:' + (active?'var(--accent)':'var(--muted)') + '">' + count + '</span>' +
+        '</div>';
+    }).join('');
+  }
+}
+
+function filterSidebarLots() { renderSidebar(); }
+
+function filterSidebarBins() { renderSidebar(); }
+
+function selectFirstLot() {
+  var lotQ = (document.getElementById('lotSearch')||{}).value||'';
+  var match = lots.find(function(l){ return l.lotId.toLowerCase().includes(lotQ.toLowerCase()); });
+  if (match) { lotFilt = match.id; binFilt = null; document.getElementById('lotSearch').value=''; render(); }
+}
+
+function selectFirstBin() {
+  var binQ = (document.getElementById('binSearch')||{}).value||'';
+  var baseBins = lotFilt ? bins.filter(function(b){ return b.lotId===lotFilt; }) : bins;
+  var match = baseBins.find(function(b){ return b.binId.toLowerCase().includes(binQ.toLowerCase()); });
+  if (match) {
+    binFilt = match.id;
+    var lot = lots.find(function(l){ return l.id===match.lotId; });
+    if (lot) lotFilt = lot.id;
+    document.getElementById('binSearch').value='';
+    render();
+  }
+}
+
+function toggleLotFilt(id) {
+  if (lotFilt === id) { lotFilt = null; binFilt = null; }
+  else { lotFilt = id; binFilt = null; }
+  render();
+}
+
+function toggleBinFilt(id) {
+  binFilt = binFilt === id ? null : id;
+  // Also set lot filter to the bin's lot
+  if (binFilt) {
+    const b = bins.find(x=>x.id===id);
+    if (b) lotFilt = b.lotId;
+  }
+  render();
+}
+
+function populateBinSelect(lotId, selectedBinId) {
+  const lotBins = bins.filter(function(b){ return b.lotId===lotId; });
+  const sel = document.getElementById('pBin');
+  sel.innerHTML = '<option value="">No bin</option>' +
+    lotBins.map(function(b){ return '<option value="'+b.id+'"'+(b.id===selectedBinId?' selected':'')+'>'+b.binId+'</option>'; }).join('');
+}
+
+function nextBinNum(lotId) {
+  const existing = bins.filter(function(b){ return b.lotId===lotId; }).map(function(b){
+    const m = b.binId.match(/(\d+)$/);
+    return m ? parseInt(m[1]) : 0;
+  });
+  const max = existing.length ? Math.max.apply(null,existing) : 0;
+  return String(max+1).padStart(4,'0');
+}
+
+function addBin(lotId) {
+  const lot = lots.find(function(l){ return l.id===lotId; });
+  if (!lot) return;
+  const num = nextBinNum(lotId);
+  const binId = lot.lotId + '-BIN-' + num;
+  bins.push({ id: 'B'+Date.now(), lotId: lotId, binId: binId });
+  saveAll(); render();
+  toast('Bin ' + binId + ' created');
+}
+
+function deleteBin(id) {
+  const hasPlates = plates.some(function(p){ return p.binId===id; });
+  if (hasPlates && !confirm('This bin has plates. Delete bin and unassign its plates?')) return;
+  plates.forEach(function(p){ if(p.binId===id) p.binId=null; });
+  bins = bins.filter(function(b){ return b.id!==id; });
+  saveAll(); render();
+}
+
+function downloadCSV() {
+  var headers = ['Lot ID','Category','Lot Received','Bin ID','Serial #','Design ID','Stage','Flatness Result','Flatness Value','Flatness Tester','Leak Result','Leak Value','Leak Tester','Thermal Result','Thermal Value','Thermal Tester','Notes'];
+
+  var rows = [];
+  lots.forEach(function(lot) {
+    var lotPlates = plates.filter(function(p){ return p.lotId===lot.id; });
+    if (!lotPlates.length) {
+      // Lot with no plates — still include it
+      rows.push([lot.lotId, lot.category||'', lot.received||'', '', '', '', '', '', '', '', '', '', '', '', '', '', lot.notes||'']);
+    } else {
+      lotPlates.forEach(function(p) {
+        var bin = bins.find(function(b){ return b.id===p.binId; });
+        rows.push([
+          lot.lotId,
+          lot.category||'',
+          lot.received||'',
+          bin ? bin.binId : '',
+          p.serial||'',
+          p.design||'',
+          p.stage||'',
+          p.flatness||'',
+          p.flatnessValue||'',
+          p.flatnessTester||'',
+          p.leak||'',
+          p.leakValue||'',
+          p.leakTester||'',
+          p.thermal||'',
+          p.thermalValue||'',
+          p.thermalTester||'',
+          p.notes||''
+        ]);
+      });
+    }
+  });
+
+  var csv = [headers].concat(rows).map(function(row) {
+    return row.map(function(cell) {
+      var val = String(cell).replace(/"/g, '""');
+      return val.indexOf(',') >= 0 || val.indexOf('"') >= 0 || val.indexOf('\n') >= 0 ? '"' + val + '"' : val;
+    }).join(',');
+  }).join('\n');
+
+  var blob = new Blob([csv], { type: 'text/csv' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = 'coldplate-export-' + new Date().toISOString().slice(0,10) + '.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('CSV exported');
+}
+
 function render() {
   renderStrip();
+  renderSidebar();
   renderLots();
 }
 
@@ -719,9 +955,11 @@ function toggleF(id) { sfilt = sfilt===id?null:id; render(); }
 function renderLots() {
   const q = document.getElementById('q').value.toLowerCase();
   const vis = lots.filter(l => {
+    if (lotFilt && l.id !== lotFilt) return false;
+    if (binFilt && !plates.some(p=>p.lotId===l.id&&p.binId===binFilt)) return false;
     if(l.lotId.toLowerCase().includes(q)) return true;
     if((l.category||'').toLowerCase().includes(q)) return true;
-    return lotPs(l.id).some(p=>p.serial.toLowerCase().includes(q)||(p.bin||'').toLowerCase().includes(q));
+    return lotPs(l.id).some(p=>p.serial.toLowerCase().includes(q)||bins.find(b=>b.id===p.binId&&b.binId.toLowerCase().includes(q)));
   });
 
   const el = document.getElementById('lotList');
@@ -732,8 +970,10 @@ function renderLots() {
     const isOpen = expanded.has(lot.id);
     const ps = lotPs(lot.id).filter(p=>{
       const sok = !sfilt||p.stage===sfilt;
-      const qok = !q||p.serial.toLowerCase().includes(q)||(p.bin||'').toLowerCase().includes(q)||lot.lotId.toLowerCase().includes(q);
-      return sok&&qok;
+      const bok = !binFilt||p.binId===binFilt;
+      const binLabel = (bins.find(b=>b.id===p.binId)||{}).binId||'';
+      const qok = !q||p.serial.toLowerCase().includes(q)||binLabel.toLowerCase().includes(q)||lot.lotId.toLowerCase().includes(q);
+      return sok&&bok&&qok;
     });
 
     return `<div class="lot-card" style="animation-delay:${li*.04}s">
@@ -741,7 +981,7 @@ function renderLots() {
         <span class="lot-chevron ${isOpen?'open':''}">▶</span>
         <div>
           <div class="lot-id-text">${lot.lotId}</div>
-          <div class="lot-sub">${lot.category ? `<span style="font-family:'IBM Plex Mono',monospace;font-size:.6rem;background:var(--accent-lt);border:1px solid var(--accent);color:var(--accent);padding:1px 6px;margin-right:6px">${lot.category}</span>` : ''}Received ${lot.received}${lot.notes?' · '+lot.notes.slice(0,40)+(lot.notes.length>40?'…':''):''} · ${lotPs(lot.id).length} plate${lotPs(lot.id).length!==1?'s':''}</div>
+          <div class="lot-sub">${lot.category ? `<span style="font-family:'IBM Plex Mono',monospace;font-size:.6rem;background:var(--accent-lt);border:1px solid var(--accent);color:var(--accent);padding:1px 6px;margin-right:6px">${lot.category}</span>` : ''}Received ${lot.received}${lot.notes?' · '+lot.notes.slice(0,40)+(lot.notes.length>40?'…':''):''} · ${bins.filter(b=>b.lotId===lot.id).length} bin${bins.filter(b=>b.lotId===lot.id).length!==1?'s':''} · ${lotPs(lot.id).length} plate${lotPs(lot.id).length!==1?'s':''}</div>
         </div>
         <div class="lot-prog">
           <div class="prog-bar"><div class="prog-fill" style="width:${pr.pct}%"></div></div>
@@ -753,11 +993,39 @@ function renderLots() {
         </div>
       </div>
       <div class="lot-body ${isOpen?'open':''}">
-        ${ps.length>0?`
-          <div class="pt-head"><div>Serial #</div><div>Bin</div><div>Flatness</div><div>Leak</div><div>Thermal</div><div>Stage</div><div style="text-align:right">Actions</div></div>
-          ${ps.map((p,i)=>plateRow(p,i)).join('')}
-        `:`<div class="empty-lot">No coldplates logged yet${sfilt?' matching this filter':''}.</div>`}
-        <div class="lot-add"><button onclick="openPlateModal(null,'${lot.id}')">+ Add coldplate to ${lot.lotId}</button></div>
+        ${(()=>{
+          const lotBins = bins.filter(b=>b.lotId===lot.id);
+          const unassigned = ps.filter(p=>!p.binId);
+          let html = '';
+          lotBins.forEach(bin=>{
+            const binPs = ps.filter(p=>p.binId===bin.id);
+            html += '<div style="border-bottom:1px solid var(--border)">';
+            html += '<div style="display:flex;align-items:center;gap:10px;padding:8px 18px 8px 40px;background:var(--surface2)">';
+            html += '<span style="font-family:IBM Plex Mono,monospace;font-weight:600;font-size:.8rem;color:var(--s-binned)">'+bin.binId+'</span>';
+            html += '<span style="font-family:IBM Plex Mono,monospace;font-size:.65rem;color:var(--muted)">'+binPs.length+' plate'+(binPs.length!==1?'s':'')+'</span>';
+            html += '<div style="margin-left:auto;display:flex;gap:5px">';
+            html += '<button class="lbtn" onclick="openPlateModal(null,\''+lot.id+'\',\''+bin.id+'\')">+ Add Plate</button>';
+            html += '<button class="lbtn del" onclick="deleteBin(\''+bin.id+'\')">Delete Bin</button>';
+            html += '</div></div>';
+            if(binPs.length>0){
+              html += '<div class="pt-head"><div>Serial #</div><div>Bin</div><div>Flatness</div><div>Leak</div><div>Thermal</div><div>Stage</div><div style="text-align:right">Actions</div><div style="text-align:right">Design</div></div>';
+              html += binPs.map((p,i)=>plateRow(p,i)).join('');
+            } else {
+              html += '<div class="empty-lot">No plates in this bin yet.</div>';
+            }
+            html += '</div>';
+          });
+          if(unassigned.length>0){
+            html += '<div style="border-bottom:1px solid var(--border)">';
+            html += '<div style="padding:8px 18px 8px 40px;background:var(--surface2);font-family:IBM Plex Mono,monospace;font-size:.72rem;color:var(--muted)">Unassigned plates</div>';
+            html += '<div class="pt-head"><div>Serial #</div><div>Bin</div><div>Flatness</div><div>Leak</div><div>Thermal</div><div>Stage</div><div style="text-align:right">Actions</div><div style="text-align:right">Design</div></div>';
+            html += unassigned.map((p,i)=>plateRow(p,i)).join('');
+            html += '</div>';
+          }
+          if(lotBins.length===0 && ps.length===0) html += '<div class="empty-lot">No bins or plates yet.</div>';
+          return html;
+        })()}
+        <div class="lot-add" style="display:flex;gap:8px"><button style="flex:1" onclick="addBin('${lot.id}')">+ Add Bin</button><button style="flex:1" onclick="openPlateModal(null,'${lot.id}',null)">+ Add Unassigned Plate</button></div>
       </div>
     </div>`;
   }).join('');
@@ -773,18 +1041,21 @@ function plateRow(p,i) {
   const tl=p.thermal==='pass'?'Pass':p.thermal==='fail'?'Fail':'Pending';
   return `<div class="pt-row" style="animation-delay:${i*.025}s">
     <div class="serial">${p.serial}</div>
-    <div>${p.bin?`<span class="bin-badge">📦 ${p.bin}</span>`:'<span style="color:var(--muted);font-size:.7rem">—</span>'}</div>
+    <div>${(()=>{ const b=bins.find(x=>x.id===p.binId); return b?'<span class="bin-badge">📦 '+b.binId+'</span>':'<span style="color:var(--muted);font-size:.7rem">—</span>'; })()}</div>
     <div class="tcell">
       <div class="tcell-row"><div class="tbadge ${bf}">${p.flatness==='pass'?'✓':p.flatness==='fail'?'✕':'–'}</div> ${fl}</div>
       ${p.flatnessTester?`<div class="tname">by ${p.flatnessTester}</div>`:''}
+      ${p.flatnessValue!==undefined&&p.flatnessValue!==''?`<div class="tname" style="${flatnessColor(p.flatnessValue)}">${p.flatnessValue}</div>`:''}
     </div>
     <div class="tcell">
       <div class="tcell-row"><div class="tbadge ${bl}">${p.leak==='pass'?'✓':p.leak==='fail'?'✕':'–'}</div> ${ll}</div>
       ${p.leakTester?`<div class="tname">by ${p.leakTester}</div>`:''}
+      ${p.leakValue?`<div class="tname">${p.leakValue}</div>`:''}
     </div>
     <div class="tcell">
       <div class="tcell-row"><div class="tbadge ${bt}">${p.thermal==='pass'?'✓':p.thermal==='fail'?'✕':'–'}</div> ${tl}</div>
       ${p.thermalTester?`<div class="tname">by ${p.thermalTester}</div>`:''}
+      ${p.thermalValue?`<div class="tname">${p.thermalValue}</div>`:''}
     </div>
     <div><span class="stage-chip" style="border-color:${st.color};color:${st.color}"><span style="width:5px;height:5px;border-radius:50%;background:${st.color};display:inline-block;margin-right:3px"></span>${st.label}</span></div>
     <div class="pact">
@@ -794,6 +1065,7 @@ function plateRow(p,i) {
       ${p.stage==='reliability'?`<button class="ibtn" title="Manage reliability tests" style="color:var(--s-reliability);border-color:var(--s-reliability)" onclick="openReliabilityModal('${p.id}')">⚗</button>`:''}
       <button class="ibtn del" title="Delete" onclick="delPlate('${p.id}')">✕</button>
     </div>
+    <div style="text-align:right;font-family:'IBM Plex Mono',monospace;font-size:.72rem;color:var(--accent);font-weight:600">${p.design||'—'}</div>
   </div>`;
 }
 
@@ -801,9 +1073,13 @@ function toggleLot(id){ expanded.has(id)?expanded.delete(id):expanded.add(id); r
 
 function deleteLot(id){
   const c=lotPs(id).length;
-  if(!confirm(c>0?`Delete lot and all ${c} coldplate(s) inside it?`:'Delete this lot?')) return;
+  const b=bins.filter(x=>x.lotId===id).length;
+  const msg = c>0?`Delete lot, ${b} bin(s) and ${c} coldplate(s)?`:(b>0?`Delete lot and ${b} bin(s)?`:'Delete this lot?');
+  if(!confirm(msg)) return;
   lots=lots.filter(l=>l.id!==id);
+  bins=bins.filter(b=>b.lotId!==id);
   plates=plates.filter(p=>p.lotId!==id);
+  if(lotFilt===id){ lotFilt=null; binFilt=null; }
   saveAll(); render(); toast('Lot deleted');
 }
 
@@ -927,28 +1203,36 @@ function saveNewCat(){
 }
 
 // plate modal
-function openPlateModal(pid=null,lctx=null){
-  editPlateId=pid; lotCtx=lctx;
+function openPlateModal(pid=null,lctx=null,bctx=null){
+  editPlateId=pid; lotCtx=lctx; binCtx=bctx;
   if(pid){
     const p=plates.find(x=>x.id===pid); lotCtx=p.lotId;
     document.getElementById('plateMTitle').textContent='Edit Coldplate';
     document.getElementById('pSerial').value=p.serial;
-    document.getElementById('pBin').value=p.bin||'';
+    document.getElementById('pDesign').value=p.design||'';
+    populateBinSelect(p.lotId, p.binId||null);
     document.getElementById('pFT').value=p.flatnessTester||'';
+    document.getElementById('pFV').value=p.flatnessValue||'';
     document.getElementById('pLT').value=p.leakTester||'';
+    document.getElementById('pLV').value=p.leakValue||'';
     document.getElementById('pTT').value=p.thermalTester||'';
+    document.getElementById('pTV').value=p.thermalValue||'';
     document.getElementById('pNotes').value=p.notes||'';
     mF=p.flatness||'pending'; mL=p.leak||'pending'; mT=p.thermal||'pending'; mS=p.stage||'received';
   } else {
     const lot=lots.find(l=>l.id===lctx);
     document.getElementById('plateMTitle').textContent=`Add to ${lot?.lotId||'Lot'}`;
     document.getElementById('pSerial').value='';
-    document.getElementById('pBin').value='';
+    document.getElementById('pDesign').value='';
+    populateBinSelect(lctx, bctx);
     document.getElementById('pFT').value='';
+    document.getElementById('pFV').value='';
     document.getElementById('pLT').value='';
+    document.getElementById('pLV').value='';
     document.getElementById('pTT').value='';
+    document.getElementById('pTV').value='';
     document.getElementById('pNotes').value='';
-    mF='pending'; mL='pending'; mT='pending'; mS='received';
+    mF='pending'; mL='pending'; mT='pending'; mS='binned';
   }
   buildSGrid(); updateTUI();
   document.getElementById('plateOv').classList.add('open');
@@ -958,14 +1242,15 @@ function closePlateModal(){ document.getElementById('plateOv').classList.remove(
 function savePlate(){
   const serial=document.getElementById('pSerial').value.trim();
   if(!serial){toast('Serial number is required');return;}
-  const data={lotId:lotCtx,serial,bin:document.getElementById('pBin').value.trim(),stage:mS,flatness:mF,flatnessTester:document.getElementById('pFT').value.trim(),leak:mL,leakTester:document.getElementById('pLT').value.trim(),thermal:mT,thermalTester:document.getElementById('pTT').value.trim(),notes:document.getElementById('pNotes').value.trim()};
+  const data={lotId:lotCtx,binId:document.getElementById('pBin').value||null,serial,design:document.getElementById('pDesign').value.trim(),stage:mS,flatness:mF,flatnessTester:document.getElementById('pFT').value.trim(),flatnessValue:document.getElementById('pFV').value.trim(),leak:mL,leakTester:document.getElementById('pLT').value.trim(),leakValue:document.getElementById('pLV').value.trim(),thermal:mT,thermalTester:document.getElementById('pTT').value.trim(),thermalValue:document.getElementById('pTV').value.trim(),notes:document.getElementById('pNotes').value.trim()};
   if(editPlateId){const i=plates.findIndex(p=>p.id===editPlateId);plates[i]={...plates[i],...data};}
   else{plates.push({id:'P'+Date.now(),...data});}
   saveAll();closePlateModal();render();toast(editPlateId?'Updated ✓':'Coldplate added ✓');
 }
 
 function buildSGrid(){
-  document.getElementById('sgrid').innerHTML=STAGES.map(s=>
+  const allowedStages = STAGES.filter(s=>s.id!=='received');
+  document.getElementById('sgrid').innerHTML=allowedStages.map(s=>
     `<div class="sopt ${mS===s.id?'sel':''}" style="${mS===s.id?`border-color:${s.color};background:${s.color}18;color:${s.color}`:''}" onclick="selS('${s.id}')">${s.label}</div>`
   ).join('');
 }
