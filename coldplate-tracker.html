@@ -281,7 +281,7 @@ body::before { content:''; position:fixed; inset:0; background-image:radial-grad
 <div id="setupScreen" class="setup-screen">
   <div class="setup-card">
     <div class="setup-top">
-      <h1>COLDPLATE TRACKER <span style="font-size:.65rem;font-weight:400;color:var(--muted);letter-spacing:1px;vertical-align:middle">v1.0</span></h1>
+      <h1>COLDPLATE TRACKER <span style="font-size:.65rem;font-weight:400;color:var(--muted);letter-spacing:1px;vertical-align:middle">v1.0.0</span></h1>
       <p>Connect to SharePoint — one-time setup</p>
     </div>
     <div class="setup-body">
@@ -328,7 +328,7 @@ body::before { content:''; position:fixed; inset:0; background-image:radial-grad
 
   <div class="header">
     <div class="brand">
-      <h1>COLDPLATE TRACKER <span style="font-size:.65rem;font-weight:400;color:var(--muted);letter-spacing:1px;vertical-align:middle">v1.0</span></h1>
+      <h1>COLDPLATE TRACKER <span style="font-size:.65rem;font-weight:400;color:var(--muted);letter-spacing:1px;vertical-align:middle">v1.0.0</span></h1>
       <p id="spLabel">SharePoint · Lot &amp; Sample Lifecycle</p>
     </div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -432,7 +432,7 @@ body::before { content:''; position:fixed; inset:0; background-image:radial-grad
     <div class="mhead"><h2 id="plateMTitle">Add Coldplate</h2><button class="mclose" onclick="closePlateModal()">✕</button></div>
     <div class="mbody">
       <div class="frow">
-        <div class="ff"><label>Serial Number *</label><input type="text" id="pSerial" placeholder="e.g. SN-00142"></div>
+        <div class="ff"><label>Serial Number *</label><input type="text" id="pSerial" placeholder="e.g. SN-00142" style="text-transform:uppercase" oninput="this.value=this.value.toUpperCase()"></div>
         <div class="ff"><label>Bin</label><select id="pBin" style="background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:.82rem;padding:9px 11px;outline:none;appearance:none;"><option value="">No bin</option></select></div>
       </div>
 
@@ -658,10 +658,9 @@ async function loadFromSharePoint() {
       raw = await r.json();
     } catch(e) {
       // File doesn't exist yet — start fresh
-      raw = { categories: ['60AA','60AB','61AA'], relCategories: ['Vibration','Thermal Cycling','Drop Test'], lots: [], plates: [] };
+      raw = { categories: ['60AA','60AB','61AA'], lots: [], plates: [] };
     }
     categories    = raw.categories    || ['60AA','60AB','61AA'];
-    relCategories = raw.relCategories || ['Vibration','Thermal Cycling','Drop Test'];
     lots          = raw.lots          || [];
     bins          = raw.bins          || [];
     plates        = raw.plates        || [];
@@ -681,7 +680,7 @@ async function saveAll() {
     const fullPath = CFG.folderPath + '/' + FILE_NAME;
     const encodedPath = encodePath(fullPath);
     const uploadUrl = `/sites/${siteId}/drive/root:${encodedPath}:/content`;
-    const payload = JSON.stringify({ categories, relCategories, lots, bins, plates }, null, 2);
+    const payload = JSON.stringify({ categories, lots, bins, plates }, null, 2);
     const token = await getToken();
     const r = await fetch('https://graph.microsoft.com/v1.0' + uploadUrl, {
       method: 'PUT',
@@ -724,7 +723,6 @@ function showSkeleton() {
 
 // ── DATA STATE (populated from SharePoint) ──
 let categories = [];
-let relCategories = [];
 let lots   = [];
 let bins   = [];
 let plates = [];
@@ -764,7 +762,7 @@ async function writeBackup(siteId, mainEncodedPath, payload) {
 }
 
 function downloadBackup() {
-  const payload = JSON.stringify({ categories, relCategories, lots, bins, plates }, null, 2);
+  const payload = JSON.stringify({ categories, lots, bins, plates }, null, 2);
   const blob = new Blob([payload], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -1056,6 +1054,43 @@ function renderLots() {
 
 function plateRow(p,i) {
   const st=si(p.stage), nxt=nextS(p.stage);
+
+  // ── RELIABILITY PLATE ── show existing test data + reliability stage
+  if (p.stage === 'reliability') {
+    const binEl = (()=>{ const b=bins.find(x=>x.id===p.binId); return b?'<span class="bin-badge">📦 '+b.binId+'</span>':'<span style="color:var(--muted);font-size:.7rem">—</span>'; })();
+    const bf=p.flatness==='pass'?'tp':p.flatness==='fail'?'tf':'tn';
+    const bl=p.leak==='pass'?'tp':p.leak==='fail'?'tf':'tn';
+    const bt=p.thermal==='pass'?'tp':p.thermal==='fail'?'tf':'tn';
+    const fl=p.flatness==='pass'?'Pass':p.flatness==='fail'?'Fail':'—';
+    const ll=p.leak==='pass'?'Pass':p.leak==='fail'?'Fail':'—';
+    const tl=p.thermal==='pass'?'Pass':p.thermal==='fail'?'Fail':'—';
+    return `<div class="pt-row" style="animation-delay:${i*.025}s">
+    <div class="serial">${p.serial}</div>
+    <div>${binEl}</div>
+    <div class="tcell">
+      <div class="tcell-row"><div class="tbadge ${bf}">${p.flatness==='pass'?'✓':p.flatness==='fail'?'✕':'–'}</div> ${fl}</div>
+      ${p.flatnessTester?`<div class="tname">by ${p.flatnessTester}</div>`:''}
+      ${p.flatnessValue!==undefined&&p.flatnessValue!==''?`<div class="tname" style="${flatnessColor(p.flatnessValue)}">${p.flatnessValue}</div>`:''}
+    </div>
+    <div class="tcell">
+      <div class="tcell-row"><div class="tbadge ${bl}">${p.leak==='pass'?'✓':p.leak==='fail'?'✕':'–'}</div> ${ll}</div>
+      ${p.leakTester?`<div class="tname">by ${p.leakTester}</div>`:''}
+      ${p.leakValue?`<div class="tname">${p.leakValue}</div>`:''}
+    </div>
+    <div class="tcell">
+      <div class="tcell-row"><div class="tbadge ${bt}">${p.thermal==='pass'?'✓':p.thermal==='fail'?'✕':'–'}</div> ${tl}</div>
+      ${p.thermalTester?`<div class="tname">by ${p.thermalTester}</div>`:''}
+      ${p.thermalValue?`<div class="tname">${p.thermalValue}</div>`:''}
+    </div>
+    <div><span class="stage-chip" style="border-color:${st.color};color:${st.color}"><span style="width:5px;height:5px;border-radius:50%;background:${st.color};display:inline-block;margin-right:3px"></span>${st.label}</span></div>
+    <div class="pact">
+      <button class="ibtn" title="Edit" onclick="openPlateModal('${p.id}')">✎</button>
+      <button class="ibtn del" title="Delete" onclick="delPlate('${p.id}')">✕</button>
+    </div>
+    <div style="text-align:right;font-family:'IBM Plex Mono',monospace;font-size:.72rem;color:var(--accent);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${p.design||''}">${p.design||'—'}</div>
+  </div>`;
+  }
+
   const bf=p.flatness==='pass'?'tp':p.flatness==='fail'?'tf':'tn';
   const bl=p.leak==='pass'?'tp':p.leak==='fail'?'tf':'tn';
   const bt=p.thermal==='pass'?'tp':p.thermal==='fail'?'tf':'tn';
@@ -1085,7 +1120,7 @@ function plateRow(p,i) {
       <button class="ibtn" title="Edit" onclick="openPlateModal('${p.id}')">✎</button>
       ${nxt&&p.stage!=='failed'&&p.stage!=='reliability'?`<button class="ibtn" title="Advance to ${si(nxt).label}" onclick="advance('${p.id}')">→</button>`:''}
       ${p.stage!=='reliability'&&p.stage!=='complete'&&p.stage!=='failed'?`<button class="ibtn" title="Send to Reliability" style="color:var(--s-reliability);border-color:var(--s-reliability)" onclick="sendToReliability('${p.id}')">⚗</button>`:''}
-      ${p.stage==='reliability'?`<button class="ibtn" title="Manage reliability tests" style="color:var(--s-reliability);border-color:var(--s-reliability)" onclick="openReliabilityModal('${p.id}')">⚗</button>`:''}
+      
       <button class="ibtn del" title="Delete" onclick="delPlate('${p.id}')">✕</button>
     </div>
     <div style="text-align:right;font-family:'IBM Plex Mono',monospace;font-size:.72rem;color:var(--accent);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${p.design||''}">${p.design||'—'}</div>
@@ -1302,13 +1337,10 @@ function updateTUI(){
 }
 
 function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2800); }
-document.addEventListener('keydown',e=>{ if(e.key==='Escape'){closeLotModal();closePlateModal();closeCatModal();closeRelModal();closeRelCatModal();} });
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'){closeLotModal();closePlateModal();closeCatModal();} });
 
 
 // ── RELIABILITY ──
-let editingRelPlateId = null;
-let pendingRelTests = [];
-let mRelResult = 'pending';
 
 function sendToReliability(id) {
   if (!confirm('Send this coldplate to Reliability? It will leave the normal lifecycle.')) return;
@@ -1317,149 +1349,20 @@ function sendToReliability(id) {
   p.stage = 'reliability';
   if (!p.reliabilityTests) p.reliabilityTests = [];
   saveAll(); render();
-  toast(p.serial + ' → Reliability');
-  openReliabilityModal(id);
+  toast(p.serial + ' moved to Reliability');
 }
 
-function openReliabilityModal(id) {
-  editingRelPlateId = id;
-  const p = plates.find(x=>x.id===id);
-  document.getElementById('relModalTitle').textContent = 'Reliability: ' + p.serial;
-  pendingRelTests = JSON.parse(JSON.stringify(p.reliabilityTests || []));
-  mRelResult = 'pending';
-  buildRelCatSelect();
-  updateRelUI();
-  renderRelTestList();
-  document.getElementById('relOv').classList.add('open');
-}
 
-function closeRelModal() {
-  document.getElementById('relOv').classList.remove('open');
-  editingRelPlateId = null;
-}
 
-function buildRelCatSelect(sel) {
-  document.getElementById('relCatSelect').innerHTML =
-    '<option value="">Select…</option>' +
-    relCategories.map(c=>'<option value="'+c+'"'+(c===sel?' selected':'')+'>'+c+'</option>').join('');
-}
 
-function setRelResult(val) { mRelResult = val; updateRelUI(); }
 
-function updateRelUI() {
-  ['rrel-n','rrel-p','rrel-f'].forEach(id=>{ const e=document.getElementById(id); if(e) e.className='ropt'; });
-  const aid = mRelResult==='pass'?'rrel-p':mRelResult==='fail'?'rrel-f':'rrel-n';
-  const el = document.getElementById(aid);
-  if(el) el.classList.add(mRelResult==='pass'?'cp':mRelResult==='fail'?'cf':'cn');
-}
 
-function renderRelTestList() {
-  const el = document.getElementById('relTestList');
-  if (!pendingRelTests.length) {
-    el.innerHTML = '<div style="font-family:IBM Plex Mono,monospace;font-size:.7rem;color:var(--muted);padding:10px 0;font-style:italic">No tests added yet.</div>';
-    return;
-  }
-  el.innerHTML = '<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">' +
-    pendingRelTests.map((t,i) => {
-      const cls=t.result==='pass'?'tp':t.result==='fail'?'tf':'tn';
-      const icon=t.result==='pass'?'✓':t.result==='fail'?'✕':'–';
-      return '<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--surface2);border:1px solid var(--border)">' +
-        '<div class="tbadge '+cls+'">'+icon+'</div>' +
-        '<span style="font-family:IBM Plex Mono,monospace;font-size:.78rem;flex:1">'+t.category+'</span>' +
-        '<span style="font-family:IBM Plex Mono,monospace;font-size:.68rem;color:var(--muted)">'+t.result+'</span>' +
-        '<button onclick="removeRelTest('+i+')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:.8rem;padding:2px 6px" style="cursor:pointer" onclick="removeRelTest('+i+')">✕</button>' +
-        '</div>';
-    }).join('') + '</div>';
-}
 
-function addRelTest() {
-  const cat = document.getElementById('relCatSelect').value;
-  if (!cat) { toast('Please select a category'); return; }
-  pendingRelTests.push({ category: cat, result: mRelResult });
-  mRelResult = 'pending';
-  updateRelUI();
-  document.getElementById('relCatSelect').value = '';
-  renderRelTestList();
-}
 
-function removeRelTest(i) { pendingRelTests.splice(i,1); renderRelTestList(); }
 
-function saveRelTests() {
-  const p = plates.find(x=>x.id===editingRelPlateId);
-  if (p) { p.reliabilityTests = [...pendingRelTests]; saveAll(); render(); toast('Reliability tests saved ✓'); }
-  closeRelModal();
-}
 
-function openAddRelCat() {
-  document.getElementById('newRelCatInput').value = '';
-  document.getElementById('relCatOv').classList.add('open');
-  setTimeout(()=>document.getElementById('newRelCatInput').focus(), 80);
-}
-function closeRelCatModal() { document.getElementById('relCatOv').classList.remove('open'); }
-function saveNewRelCat() {
-  const code = document.getElementById('newRelCatInput').value.trim();
-  if (!code) { toast('Category name is required'); return; }
-  if (relCategories.includes(code)) { toast(code+' already exists'); return; }
-  relCategories.push(code);
-  saveAll();
-  closeRelCatModal();
-  buildRelCatSelect(code);
-  document.getElementById('relCatSelect').value = code;
-  toast('Category "'+code+'" added ✓');
-}
 
 // App starts via showApp() triggered after Microsoft sign-in
 </script>
-
-<!-- RELIABILITY MODAL -->
-<div class="ov" id="relOv" onclick="if(event.target===this)closeRelModal()">
-  <div class="modal" style="max-width:560px">
-    <div class="mhead">
-      <h2 id="relModalTitle">Reliability Tests</h2>
-      <button class="mclose" onclick="closeRelModal()">✕</button>
-    </div>
-    <div class="mbody">
-      <div style="font-family:'IBM Plex Mono',monospace;font-size:.7rem;color:var(--muted);margin-bottom:4px">Custom tests for this plate. Add categories and set Pass/Fail.</div>
-      <div id="relTestList"></div>
-      <div class="sec">Add Test</div>
-      <div class="frow">
-        <div class="ff">
-          <label>Test Category</label>
-          <div style="display:flex;gap:6px">
-            <select id="relCatSelect" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:.82rem;padding:9px 11px;outline:none;appearance:none;"><option value="">Select…</option></select>
-            <button onclick="openAddRelCat()" title="Add category" style="background:var(--surface2);border:1px solid var(--border);color:var(--muted);font-size:1rem;width:38px;cursor:pointer;flex-shrink:0;" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">+</button>
-          </div>
-        </div>
-        <div class="ff">
-          <label>Result</label>
-          <div class="rrow" style="margin-top:2px">
-            <div class="ropt" id="rrel-n" onclick="setRelResult('pending')">— Pend</div>
-            <div class="ropt" id="rrel-p" onclick="setRelResult('pass')">✓ Pass</div>
-            <div class="ropt" id="rrel-f" onclick="setRelResult('fail')">✕ Fail</div>
-          </div>
-        </div>
-      </div>
-      <button onclick="addRelTest()" style="background:var(--text);border:none;color:#fff;font-family:'IBM Plex Mono',monospace;font-size:.75rem;padding:8px 18px;cursor:pointer;margin-top:8px">+ Add Test</button>
-    </div>
-    <div class="mfoot">
-      <button class="btn-cancel" onclick="closeRelModal()">Close</button>
-      <button class="btn-save" onclick="saveRelTests()">Save</button>
-    </div>
-  </div>
-</div>
-
-<!-- ADD RELIABILITY CATEGORY MODAL -->
-<div class="ov" id="relCatOv" onclick="if(event.target===this)closeRelCatModal()" style="z-index:300">
-  <div class="modal" style="max-width:360px">
-    <div class="mhead"><h2>Add Test Category</h2><button class="mclose" onclick="closeRelCatModal()">✕</button></div>
-    <div class="mbody">
-      <div class="ff"><label>Category Name *</label><input type="text" id="newRelCatInput" placeholder="e.g. Vibration, Drop Test…"></div>
-    </div>
-    <div class="mfoot">
-      <button class="btn-cancel" onclick="closeRelCatModal()">Cancel</button>
-      <button class="btn-save" onclick="saveNewRelCat()">Add</button>
-    </div>
-  </div>
-</div>
-</body>
+    </body>
 </html>
