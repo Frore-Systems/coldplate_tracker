@@ -1015,11 +1015,12 @@ function renderLots() {
       </div>
       <div class="lot-body ${isOpen?'open':''}">
         ${(()=>{
-          const lotBins = bins.filter(b=>b.lotId===lot.id);
+          const allLotBins = bins.filter(b=>b.lotId===lot.id);
+          const visLotBins = binFilt ? allLotBins.filter(b=>b.id===binFilt) : allLotBins;
           const allLotPs = lotPs(lot.id).filter(p=>{ const sok=!sfilt||p.stage===sfilt; return sok; });
-          const unassigned = allLotPs.filter(p=>!p.binId);
+          const unassigned = !binFilt ? allLotPs.filter(p=>!p.binId) : [];
           let html = '';
-          lotBins.forEach(bin=>{
+          visLotBins.forEach(bin=>{
             const binPs = allLotPs.filter(p=>p.binId===bin.id);
             html += '<div style="border-bottom:1px solid var(--border)">';
             html += '<div style="display:flex;align-items:center;gap:10px;padding:8px 18px 8px 40px;background:var(--surface2)">';
@@ -1044,7 +1045,7 @@ function renderLots() {
             html += unassigned.map((p,i)=>plateRow(p,i)).join('');
             html += '</div>';
           }
-          if(lotBins.length===0 && ps.length===0) html += '<div class="empty-lot">No bins or plates yet.</div>';
+          if(allLotBins.length===0 && allLotPs.length===0) html += '<div class="empty-lot">No bins or plates yet.</div>';
           return html;
         })()}
         <div class="lot-add" style="display:flex;gap:8px"><button style="flex:1" onclick="addBin('${lot.id}')">+ Add Bin</button><button style="flex:1" onclick="openPlateModal(null,'${lot.id}',null)">+ Add Unassigned Plate</button></div>
@@ -1264,6 +1265,16 @@ function closePlateModal(){ document.getElementById('plateOv').classList.remove(
 function savePlate(){
   const serial=document.getElementById('pSerial').value.trim();
   if(!serial){toast('Serial number is required');return;}
+  // Check uniqueness — serial must be unique across all plates except the one being edited
+  const duplicate = plates.find(function(p){
+    return p.serial===serial && p.id!==(editPlateId||'');
+  });
+  if(duplicate){
+    const dupBin = bins.find(function(b){ return b.id===duplicate.binId; });
+    const dupLot = lots.find(function(l){ return l.id===duplicate.lotId; });
+    toast('Serial '+serial+' already exists in '+(dupLot?dupLot.lotId:'another lot')+(dupBin?' / '+dupBin.binId:''));
+    return;
+  }
   const data={lotId:lotCtx,binId:document.getElementById('pBin').value||null,serial,design:document.getElementById('pDesign').value.trim(),stage:mS,flatness:mF,flatnessTester:document.getElementById('pFT').value.trim(),flatnessValue:document.getElementById('pFV').value.trim(),leak:mL,leakTester:document.getElementById('pLT').value.trim(),leakValue:document.getElementById('pLV').value.trim(),thermal:mT,thermalTester:document.getElementById('pTT').value.trim(),thermalValue:document.getElementById('pTV').value.trim(),notes:document.getElementById('pNotes').value.trim()};
   if(editPlateId){const i=plates.findIndex(p=>p.id===editPlateId);plates[i]={...plates[i],...data};}
   else{plates.push({id:'P'+Date.now(),...data});}
