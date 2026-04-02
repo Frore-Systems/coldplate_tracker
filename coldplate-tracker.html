@@ -489,6 +489,7 @@ body::before { content:''; position:fixed; inset:0; background-image:radial-grad
 <div class="toast" id="toast"></div>
 
 <script>
+
 const STAGES = [
   {id:'received', label:'Received', color:'var(--s-received)'},
   {id:'binned',   label:'Binned',   color:'var(--s-binned)'},
@@ -515,7 +516,10 @@ let spSiteId = null;
 let currentUser = '';
 
 function getRedirectUri() {
-  return window.location.href.split('?')[0].split('#')[0];
+  // Always use the dedicated redirect page — never the app page itself
+  const base = window.location.href.split('?')[0].split('#')[0];
+  const dir = base.substring(0, base.lastIndexOf('/') + 1);
+  return dir + 'redirect.html';
 }
 
 function waitForMsal(cb, attempts=0) {

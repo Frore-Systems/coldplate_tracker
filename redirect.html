@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Signing in...</title>
+  <style>
+    body { margin:0; background:#f5f5f0; display:flex; align-items:center; justify-content:center; height:100vh; font-family:'IBM Plex Mono',monospace; color:#888; font-size:.8rem; }
+  </style>
+</head>
+<body>
+  <div>Completing sign in...</div>
+  <script>
+    // This page is the MSAL redirect URI — it handles the auth response
+    // and then navigates to the main app
+    if (window.location.hash || window.location.search.includes('code=')) {
+      // Store the hash/params for the main app to pick up
+      sessionStorage.setItem('msal_redirect', window.location.href);
+      // Redirect to main app
+      window.location.replace('./coldplate-tracker.html');
+    } else {
+      window.location.replace('./coldplate-tracker.html');
+    }
+  </script>
+</body>
+</html>
