@@ -281,7 +281,7 @@ body::before { content:''; position:fixed; inset:0; background-image:radial-grad
 <div id="setupScreen" class="setup-screen">
   <div class="setup-card">
     <div class="setup-top">
-      <h1>COLDPLATE TRACKER <span style="font-size:.65rem;font-weight:400;color:var(--muted);letter-spacing:1px;vertical-align:middle">v1.0.1</span></h1>
+      <h1>COLDPLATE TRACKER <span style="font-size:.65rem;font-weight:400;color:var(--muted);letter-spacing:1px;vertical-align:middle">v1.0.2</span></h1>
       <p>Connect to SharePoint — one-time setup</p>
     </div>
     <div class="setup-body">
@@ -328,7 +328,7 @@ body::before { content:''; position:fixed; inset:0; background-image:radial-grad
 
   <div class="header">
     <div class="brand">
-      <h1>COLDPLATE TRACKER <span style="font-size:.65rem;font-weight:400;color:var(--muted);letter-spacing:1px;vertical-align:middle">v1.0.1</span></h1>
+      <h1>COLDPLATE TRACKER <span style="font-size:.65rem;font-weight:400;color:var(--muted);letter-spacing:1px;vertical-align:middle">v1.0.2</span></h1>
       <p id="spLabel">SharePoint · Lot &amp; Sample Lifecycle</p>
     </div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -461,7 +461,9 @@ body::before { content:''; position:fixed; inset:0; background-image:radial-grad
             <div class="ropt" id="rl-f" onclick="setT('l','fail')">✕ Fail</div>
           </div>
           <div class="ff"><label>Tested By</label><input type="text" id="pLT" placeholder="Name"></div>
-          <div class="ff"><label>Value (optional)</label><input type="number" id="pLV" placeholder="e.g. 0.0" step="any"></div>
+          <div class="ff"><label>Initial Value</label><input type="number" id="pLV" placeholder="e.g. 0.0" step="any" oninput="calcLeakDrop()" onchange="calcLeakDrop()"></div>
+          <div class="ff"><label>Final Value</label><input type="number" id="pLVF" placeholder="e.g. 0.0" step="any" oninput="calcLeakDrop()" onchange="calcLeakDrop()"></div>
+          <div id="leakDropResult" style="font-family:'IBM Plex Mono',monospace;font-size:.72rem;padding:4px 0;min-height:20px"></div>
         </div>
         <div class="tblock">
           <div class="tblock-title">🌡 Thermal</div>
@@ -872,6 +874,24 @@ function toggleBinFilt(id) {
   render();
 }
 
+
+function calcLeakDrop() {
+  const el = document.getElementById('leakDropResult');
+  if (!el) return;
+  const initial = parseFloat(document.getElementById('pLV').value);
+  const final = parseFloat(document.getElementById('pLVF').value);
+  if (isNaN(initial) || isNaN(final) || initial === 0) {
+    el.innerHTML = '';
+    return;
+  }
+  const drop = ((initial - final) / initial) * 100;
+  const pass = Math.abs(drop) < 0.5;
+  const color = pass ? '#16a34a' : '#dc2626';
+  const icon = pass ? '✓' : '✕';
+  const dropColor = Math.abs(drop) < 0.5 ? '#16a34a' : Math.abs(drop) <= 1.0 ? '#d97706' : '#dc2626';
+  el.innerHTML = '<span style="font-family:IBM Plex Mono,monospace;font-size:.72rem;font-weight:600;color:' + dropColor + '">Pressure drop: ' + drop.toFixed(3) + '%</span>';
+}
+
 function populateBinSelect(lotId, selectedBinId) {
   const lotBins = bins.filter(function(b){ return b.lotId===lotId; });
   const sel = document.getElementById('pBin');
@@ -907,7 +927,7 @@ function deleteBin(id) {
 }
 
 function downloadCSV() {
-  var headers = ['Lot ID','Category','Lot Received','Bin ID','Serial #','Design ID','Stage','Flatness Result','Flatness Value','Flatness Tester','Leak Result','Leak Value','Leak Tester','Thermal Result','Thermal Value','Thermal Tester','Notes'];
+  var headers = ['Lot ID','Category','Lot Received','Bin ID','Serial #','Design ID','Stage','Flatness Result','Flatness Value','Flatness Tester','Leak Result','Leak Initial','Leak Final','Leak Tester','Thermal Result','Thermal Value','Thermal Tester','Notes'];
 
   var rows = [];
   lots.forEach(function(lot) {
@@ -931,6 +951,7 @@ function downloadCSV() {
           p.flatnessTester||'',
           p.leak||'',
           p.leakValue||'',
+          p.leakValueFinal||'',
           p.leakTester||'',
           p.thermal||'',
           p.thermalValue||'',
@@ -985,9 +1006,14 @@ function renderLots() {
   const vis = lots.filter(l => {
     if (lotFilt && l.id !== lotFilt) return false;
     if (binFilt && !plates.some(p=>p.lotId===l.id&&p.binId===binFilt)) return false;
+    if(!q) return true;
     if(l.lotId.toLowerCase().includes(q)) return true;
     if((l.category||'').toLowerCase().includes(q)) return true;
-    return lotPs(l.id).some(p=>p.serial.toLowerCase().includes(q)||bins.find(b=>b.id===p.binId&&b.binId.toLowerCase().includes(q)));
+    return lotPs(l.id).some(p=>
+      p.serial.toLowerCase().includes(q)||
+      (p.design||'').toLowerCase().includes(q)||
+      bins.some(b=>b.id===p.binId&&b.binId.toLowerCase().includes(q))
+    );
   });
 
   const el = document.getElementById('lotList');
@@ -1000,7 +1026,7 @@ function renderLots() {
       const sok = !sfilt||p.stage===sfilt;
       const bok = !binFilt||p.binId===binFilt;
       const binLabel = (bins.find(b=>b.id===p.binId)||{}).binId||'';
-      const qok = !q||p.serial.toLowerCase().includes(q)||binLabel.toLowerCase().includes(q)||lot.lotId.toLowerCase().includes(q);
+      const qok = !q||p.serial.toLowerCase().includes(q)||binLabel.toLowerCase().includes(q)||lot.lotId.toLowerCase().includes(q)||(p.design||'').toLowerCase().includes(q);
       return sok&&bok&&qok;
     });
 
@@ -1084,7 +1110,8 @@ function plateRow(p,i) {
     <div class="tcell">
       <div class="tcell-row"><div class="tbadge ${bl}">${p.leak==='pass'?'✓':p.leak==='fail'?'✕':'–'}</div> ${ll}</div>
       ${p.leakTester?`<div class="tname">by ${p.leakTester}</div>`:''}
-      ${p.leakValue?`<div class="tname">${p.leakValue}</div>`:''}
+      ${p.leakValue?`<div class="tname">i: ${p.leakValue}${p.leakValueFinal?' → f: '+p.leakValueFinal:''}</div>`:''}
+      ${p.leakDrop!==undefined&&p.leakDrop!==''?`<div class="tname" style="color:${Math.abs(parseFloat(p.leakDrop))<0.5?'#16a34a':Math.abs(parseFloat(p.leakDrop))<=1?'#d97706':'#dc2626'};font-weight:600">${p.leakDrop}%</div>`:''}
     </div>
     <div class="tcell">
       <div class="tcell-row"><div class="tbadge ${bt}">${p.thermal==='pass'?'✓':p.thermal==='fail'?'✕':'–'}</div> ${tl}</div>
@@ -1117,7 +1144,8 @@ function plateRow(p,i) {
     <div class="tcell">
       <div class="tcell-row"><div class="tbadge ${bl}">${p.leak==='pass'?'✓':p.leak==='fail'?'✕':'–'}</div> ${ll}</div>
       ${p.leakTester?`<div class="tname">by ${p.leakTester}</div>`:''}
-      ${p.leakValue?`<div class="tname">${p.leakValue}</div>`:''}
+      ${p.leakValue?`<div class="tname">i: ${p.leakValue}${p.leakValueFinal?' → f: '+p.leakValueFinal:''}</div>`:''}
+      ${p.leakDrop!==undefined&&p.leakDrop!==''?`<div class="tname" style="color:${Math.abs(parseFloat(p.leakDrop))<0.5?'#16a34a':Math.abs(parseFloat(p.leakDrop))<=1?'#d97706':'#dc2626'};font-weight:600">${p.leakDrop}%</div>`:''}
     </div>
     <div class="tcell">
       <div class="tcell-row"><div class="tbadge ${bt}">${p.thermal==='pass'?'✓':p.thermal==='fail'?'✕':'–'}</div> ${tl}</div>
@@ -1282,6 +1310,8 @@ function openPlateModal(pid=null,lctx=null,bctx=null){
     document.getElementById('pFV').value=p.flatnessValue||'';
     document.getElementById('pLT').value=p.leakTester||'';
     document.getElementById('pLV').value=p.leakValue||'';
+    document.getElementById('pLVF').value=p.leakValueFinal||'';
+    setTimeout(calcLeakDrop, 50);
     document.getElementById('pTT').value=p.thermalTester||'';
     document.getElementById('pTV').value=p.thermalValue||'';
     document.getElementById('pNotes').value=p.notes||'';
@@ -1296,6 +1326,8 @@ function openPlateModal(pid=null,lctx=null,bctx=null){
     document.getElementById('pFV').value='';
     document.getElementById('pLT').value='';
     document.getElementById('pLV').value='';
+    document.getElementById('pLVF').value='';
+    setTimeout(calcLeakDrop, 50);
     document.getElementById('pTT').value='';
     document.getElementById('pTV').value='';
     document.getElementById('pNotes').value='';
@@ -1319,7 +1351,7 @@ function savePlate(){
     toast('Serial '+serial+' already exists in '+(dupLot?dupLot.lotId:'another lot')+(dupBin?' / '+dupBin.binId:''));
     return;
   }
-  const data={lotId:lotCtx,binId:document.getElementById('pBin').value||null,serial,design:document.getElementById('pDesign').value.trim(),stage:mS,flatness:mF,flatnessTester:document.getElementById('pFT').value.trim(),flatnessValue:document.getElementById('pFV').value.trim(),leak:mL,leakTester:document.getElementById('pLT').value.trim(),leakValue:document.getElementById('pLV').value.trim(),thermal:mT,thermalTester:document.getElementById('pTT').value.trim(),thermalValue:document.getElementById('pTV').value.trim(),notes:document.getElementById('pNotes').value.trim()};
+  const data={lotId:lotCtx,binId:document.getElementById('pBin').value||null,serial,design:document.getElementById('pDesign').value.trim(),stage:mS,flatness:mF,flatnessTester:document.getElementById('pFT').value.trim(),flatnessValue:document.getElementById('pFV').value.trim(),leak:mL,leakTester:document.getElementById('pLT').value.trim(),leakValue:document.getElementById('pLV').value.trim(),leakValueFinal:document.getElementById('pLVF').value.trim(),leakDrop:(function(){ const i=parseFloat(document.getElementById('pLV').value),f=parseFloat(document.getElementById('pLVF').value); return (!isNaN(i)&&!isNaN(f)&&i!==0)?((i-f)/i*100).toFixed(3):''; })(),thermal:mT,thermalTester:document.getElementById('pTT').value.trim(),thermalValue:document.getElementById('pTV').value.trim(),notes:document.getElementById('pNotes').value.trim()};
   if(editPlateId){const i=plates.findIndex(p=>p.id===editPlateId);plates[i]={...plates[i],...data};}
   else{plates.push({id:'P'+Date.now(),...data});}
   saveAll();closePlateModal();render();toast(editPlateId?'Updated ✓':'Coldplate added ✓');
